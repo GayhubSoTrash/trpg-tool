@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <title>跑團工具</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <button id="open-create-btn" class="corner-btn">+</button>
+
+    <div id="character-sidebar" class="character-sidebar">
+        <div id="character-list" class="character-list"></div>
+    </div>
+
+    <div id="context-menu" class="context-menu hidden">
+        <div class="menu-item" id="menu-move">移動</div>
+        <div class="menu-item" id="menu-delete">刪除</div>
+    </div>
+
+    <div id="context-menu-battlefield" class="context-menu-battlefield hidden">
+        <div class="menu-item" id="menu-add">生成戰場格</div>
+    </div>
+
+    <div id="add-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>編輯戰場格大小</h2>
+            <button id="close-add-btn" class="close-btn">×</button>
+            <form id="add-form">
+                <div class="stats-grid">
+                    <div class="field-group">
+                        <input type="number" id="input-row" placeholder=" " required>
+                        <label for="input-row">高</label>
+                        <div class="underline underline-name"></div>
+                    </div>
+                    <div class="field-group">
+                        <input type="number" id="input-col" placeholder=" " required>
+                        <label for="input-col">寬</label>
+                        <div class="underline underline-name"></div>
+                    </div>
+                </div>
+                <button type="submit" class="create-btn">生成</button>
+            </form>
+
+        </div>
+    </div>
+
+    <div id="viewport">
+        <div id="world"></div>
+    </div>
+
+
+
+    <div id="create-modal" class="modal hidden">
+        <div class="modal-content">
+            <button id="close-create-btn" class="close-btn">×</button>
+
+            <form id="create-form">
+                <div class="top-section">
+                    <label for="input-image" class="image-preview">
+                        <img id="preview-img" src="" class="hidden">
+                        <span id="preview-placeholder">點擊上傳圖片</span>
+                    </label>
+                    <input type="file" id="input-image" accept="image/*" class="hidden-input">
+
+                    <div class="basic-info">
+                        <div class="field-group">
+                            <input type="text" id="input-name" placeholder=" " required>
+                            <label for="input-name">名稱</label>
+                            <div class="underline underline-name"></div>
+                        </div>
+                        <div class="field-group">
+                            <input type="number" id="input-hp" placeholder=" " required>
+                            <label for="input-hp">HP</label>
+                            <div class="underline underline-hp"></div>
+                        </div>
+                        <div class="field-group">
+                            <input type="number" id="input-ap" placeholder=" " required>
+                            <label for="input-ap">AP</label>
+                            <div class="underline underline-ap"></div>
+                        </div>
+                        <div class="field-group">
+                            <input type="number" id="input-sp" placeholder=" " required>
+                            <label for="input-sp">SP</label>
+                            <div class="underline underline-sp"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="field-group">
+                        <input type="number" id="input-patk" placeholder=" " required>
+                        <label for="input-patk">物理攻擊</label>
+                        <div class="underline underline-patk"></div>
+                    </div>
+                    <div class="field-group">
+                        <input type="number" id="input-matk" placeholder=" " required>
+                        <label for="input-matk">魔法攻擊</label>
+                        <div class="underline underline-matk"></div>
+                    </div>
+                    <div class="field-group">
+                        <input type="number" id="input-crit" placeholder=" " required>
+                        <label for="input-crit">暴擊</label>
+                        <div class="underline underline-crit"></div>
+                    </div>
+                    <div class="field-group">
+                        <input type="number" id="input-hitRate" placeholder=" " required>
+                        <label for="input-hitRate">命中</label>
+                        <div class="underline underline-hitRate"></div>
+                    </div>
+                    <div class="field-group">
+                        <input type="number" id="input-dodge" placeholder=" " required>
+                        <label for="input-dodge">迴避</label>
+                        <div class="underline underline-dodge"></div>
+                    </div>
+                    <div class="field-group">
+                        <input type="number" id="input-speed" placeholder=" " required>
+                        <label for="input-speed">行動速度</label>
+                        <div class="underline underline-speed"></div>
+                    </div>
+                    <div class="field-group">
+                        <input type="number" id="input-defense" placeholder=" " required>
+                        <label for="input-defense">防禦</label>
+                        <div class="underline underline-defense"></div>
+                    </div>
+                    <div class="field-group">
+                        <input type="number" id="input-resist" placeholder=" " required>
+                        <label for="input-resist">魔抗</label>
+                        <div class="underline underline-resist"></div>
+                    </div>
+                </div>
+
+                <button type="submit" class="create-btn">創建角色</button>
+            </form>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+
+</html>
