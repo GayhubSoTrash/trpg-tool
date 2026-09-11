@@ -178,6 +178,27 @@ async function loadGridGroups() {
             cellDiv.style.width = group.cellSize + 'px';
             cellDiv.style.height = group.cellSize + 'px';
 
+            if (cell.occupiedBy !== null) {
+                const token = document.createElement('div');
+                const hpPercent = cell.characterMaxHp > 0 ? (cell.characterHp / cell.characterMaxHp) * 100 : 0;
+
+                token.innerHTML = `
+                  <div class="bar-container bar-hp"><div class="bar-fill" style="width: ${hpPercent}%">${cell.characterHp} / ${cell.characterMaxHp}</div></div>
+                  <div class="token-image" style="background-image: url('${cell.characterImage || ''}')"></div>
+                  <div class="token-name">${cell.characterName}</div>
+                `;
+                token.classList.add('cell-token');
+                token.draggable = false;
+                token.dataset.characterId = cell.occupiedBy;
+                cellDiv.appendChild(token);
+
+                token.addEventListener('pointerdown', (event) => {
+                    event.stopPropagation();
+                    startExistingTokenDrag(cell.occupiedBy, event);
+                });
+            }
+
+
             groupDiv.appendChild(cellDiv);
         });
 
@@ -493,19 +514,20 @@ function setupCharacterCardEvents(card, img, character) {
 }
 
 function startTokenDrag(character, startEvent) {
-    const ghostToken = document.createElement('img');
-    ghostToken.src = character.image || '/default-avatar.png';
-    ghostToken.classList.add('drag-ghost-token');
-    ghostToken.style.position = 'fixed';
-    ghostToken.style.width = '50px';
-    ghostToken.style.height = '50px';
-    ghostToken.style.pointerEvents = 'none';
-    ghostToken.style.zIndex = '3000';
+    const ghostToken = document.createElement('div');
+    const hpPercent = (character.hp / character.maxHp) * 100;
+    ghostToken.className = 'token';
+    ghostToken.innerHTML = `
+        <div class="bar-container bar-hp"><div class="bar-fill" style="width: ${hpPercent}%">${character.hp} / ${character.maxHp}</div></div>
+        <div class="token-image" style="background-image: url('${character.image || ''}')"></div>
+         <div class="token-name">${character.name}</div>
+         `;
+
     document.body.appendChild(ghostToken);
 
     function moveGhost(event) {
-        ghostToken.style.left = (event.clientX - 25) + 'px';
-        ghostToken.style.top = (event.clientY - 25) + 'px';
+        ghostToken.style.left = (event.clientX - 60) + 'px';
+        ghostToken.style.top = (event.clientY - 80) + 'px';
     }
     moveGhost(startEvent);
 
@@ -536,6 +558,63 @@ function startTokenDrag(character, startEvent) {
                 loadGridGroups();
             }
         }
+    }
+
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
+}
+
+function startExistingTokenDrag(characterId, startEvent) {
+    const character = allCharacters.find(c => c.id === characterId);
+    if (!character) return;
+
+    const ghostToken = document.createElement('div');
+    const hpPercent = (character.hp / character.maxHp) * 100;
+    ghostToken.className = 'token';
+    ghostToken.innerHTML = `
+        <div class="bar-container bar-hp"><div class="bar-fill" style="width: ${hpPercent}%">${character.hp} / ${character.maxHp}</div></div>
+        <div class="token-image" style="background-image: url('${character.image || '/default-avatar.png'}')"></div>
+         <div class="token-name">${character.name}</div>
+         `;
+    document.body.appendChild(ghostToken);
+
+    function moveGhost(event) {
+        ghostToken.style.left = (event.clientX - 60) + 'px';
+        ghostToken.style.top = (event.clientY - 80) + 'px';
+    }
+    moveGhost(startEvent);
+
+    function onPointerMove(event) {
+        moveGhost(event);
+    }
+
+    async function onPointerUp(event) {
+        document.removeEventListener('pointermove', onPointerMove);
+        document.removeEventListener('pointerup', onPointerUp);
+        ghostToken.remove();
+
+        const elementBelow = document.elementFromPoint(event.clientX, event.clientY);
+        const cellDiv = elementBelow ? elementBelow.closest('.cell') : null;
+
+        if (!cellDiv) {
+            await fetch(`/api/characters/${characterId}/vacate`, { method: 'PATCH' });
+            loadGridGroups();
+            return;
+        }
+
+        const cellId = Number(cellDiv.dataset.cellId);
+        const response = await fetch(`/api/cells/${cellId}/occupy`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ characterId })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            alert(error.error);
+        }
+
+        loadGridGroups();
     }
 
     document.addEventListener('pointermove', onPointerMove);

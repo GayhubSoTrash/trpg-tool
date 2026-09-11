@@ -95,11 +95,19 @@ app.get('/api/grid-groups', async (req, res) => {
 
         for (const g of groupsResult.rows) {
             const cellsResult = await pool.query(
-                `SELECT cells.*, characters.name AS character_name, characters.image_path AS character_image
-           FROM cells
-           LEFT JOIN characters ON cells.occupied_by = characters.id
-           WHERE cells.group_id = $1
-           ORDER BY row_index, col_index`,
+                `SELECT cells.*, 
+                        characters.name AS character_name, 
+                        characters.image_path AS character_image,
+                        characters.hp AS character_hp,
+                        characters.max_hp AS character_max_hp,
+                        characters.ap AS character_ap,
+                        characters.max_ap AS character_max_ap,
+                        characters.sp AS character_sp,
+                        characters.max_sp AS character_max_sp
+                 FROM cells
+                 LEFT JOIN characters ON cells.occupied_by = characters.id
+                 WHERE cells.group_id = $1
+                 ORDER BY row_index, col_index`,
                 [g.id]
             );
 
@@ -116,7 +124,13 @@ app.get('/api/grid-groups', async (req, res) => {
                     col: c.col_index,
                     occupiedBy: c.occupied_by,
                     characterName: c.character_name,
-                    characterImage: c.character_image
+                    characterImage: c.character_image,
+                    characterHp: c.character_hp,
+                    characterMaxHp: c.character_max_hp,
+                    characterAp: c.character_ap,
+                    characterMaxAp: c.character_max_ap,
+                    characterSp: c.character_sp,
+                    characterMaxSp: c.character_max_sp
                 }))
             });
         }
@@ -138,7 +152,7 @@ app.post('/api/grid-groups', async (req, res) => {
         const groupResult = await client.query(
             `INSERT INTO grid_groups (world_x, world_y, rows, cols, cell_size)
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-            [Number(worldX), Number(worldY), Number(rows), Number(cols), cellSize ? Number(cellSize) : 160]
+            [Number(worldX), Number(worldY), Number(rows), Number(cols), cellSize ? Number(cellSize) : 180]
         );
         const group = groupResult.rows[0];
 

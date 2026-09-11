@@ -371,8 +371,8 @@ body {
 }
 
 .token-image {
-    width: 120px;
-    height: 120px;
+    width: 135px;
+    height: 135px;
     background-size: cover;
     background-position: center;
     background-color: #555;
@@ -381,7 +381,7 @@ body {
 }
 
 .bar-container {
-    width: 130%;
+    width: 140px;
     height: 16px;
     background: #333;
     margin-bottom: 6px;
@@ -389,8 +389,8 @@ body {
     border-radius: 3px;
     overflow: hidden;
     color: white;
-    margin-left: -15%;
-    margin-right: -15%;
+    margin-left: -5%;
+    margin-right: -5%;
     text-align: center;
     font-size: 14px;
     font-weight: bold;
@@ -407,10 +407,14 @@ body {
 
 .token-name {
     text-align: center;
-    color: white;
     font-size: 12px;
     margin-top: 4px;
-    text-shadow: 0 0 3px black;
+    color: black;
+    text-shadow: -1px -1px 0 #fff,
+        1px -1px 0 #fff,
+        -1px 1px 0 #fff,
+        1px 1px 0 #fff;
+    font-weight: bold;
 }
 
 .low-bar {
@@ -515,7 +519,7 @@ body {
 
 .field-group input:focus~label,
 .field-group input:not(:placeholder-shown)~label {
-    transform: translateY(-28px) translateX(-4px) scale(0.75);
+    transform: translateY(-25px) translateX(-4px) scale(0.75);
     color: #4da6ff;
     background-color: transparent;
     padding: 0 4px;
@@ -565,10 +569,15 @@ body {
 
 .character-card-left .character-name {
     font-size: 12px;
-    color: white;
     text-align: center;
     margin-top: 4px;
     word-break: break-all;
+    color: black;
+    text-shadow: -1px -1px 0 #fff,
+        1px -1px 0 #fff,
+        -1px 1px 0 #fff,
+        1px 1px 0 #fff;
+    font-weight: bold;
 }
 
 .speed-badge {
@@ -642,5 +651,19 @@ body {
         1px 1px 0 #fff;
     background: transparent;
     font-weight: bold;
-    padding: 0 8px;   
+    padding: 0 8px;
+}
+
+.cell-token {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+    margin-top: 4px;
 }
