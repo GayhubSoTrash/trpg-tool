@@ -1,141 +1,452 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
-
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>跑團工具</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/style.css">
 </head>
 
 <body>
-    <button id="open-create-btn" class="corner-btn">+</button>
-
-    <div id="character-sidebar" class="character-sidebar">
-        <div id="character-list" class="character-list"></div>
-    </div>
-
-    <div id="context-menu" class="context-menu hidden">
-        <div class="menu-item" id="menu-move">移動</div>
-        <div class="menu-item" id="menu-delete">刪除</div>
-    </div>
-
-    <div id="context-menu-battlefield" class="context-menu-battlefield hidden">
-        <div class="menu-item" id="menu-add">生成戰場格</div>
-    </div>
-
-    <div id="add-modal" class="modal hidden">
-        <div class="modal-content">
-            <h2>編輯戰場格大小</h2>
-            <button id="close-add-btn" class="close-btn">×</button>
-            <form id="add-form">
-                <div class="stats-grid">
-                    <div class="field-group">
-                        <input type="number" id="input-row" placeholder=" " required>
-                        <label for="input-row">高</label>
-                        <div class="underline underline-name"></div>
-                    </div>
-                    <div class="field-group">
-                        <input type="number" id="input-col" placeholder=" " required>
-                        <label for="input-col">寬</label>
-                        <div class="underline underline-name"></div>
-                    </div>
-                </div>
-                <button type="submit" class="create-btn">生成</button>
-            </form>
-
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-mark">D20</div>
+            <div>
+                <h1>跑團工具</h1>
+                <small>TABLETOP ROLEPLAYING TOOL</small>
+            </div>
         </div>
-    </div>
 
-    <div id="viewport">
+        <section class="initiative-strip" aria-label="戰鬥順序">
+            <div class="initiative-round">
+                <span class="initiative-label">戰鬥順序</span>
+                <strong id="round-turn-label">第一輪－第一回合</strong>
+            </div>
+            <div class="initiative-status">
+                <span>當前：<strong id="current-turn-name">—</strong></span>
+                <i>›</i>
+                <span>下一位：<strong id="next-turn-name">—</strong></span>
+            </div>
+            <label class="action-actor-control" title="戰技操作者不受目前回合角色限制">
+                <span>行動角色</span>
+                <select id="action-actor-select"></select>
+            </label>
+            <div class="initiative-actions">
+                <button id="next-turn-btn" class="initiative-next-btn" type="button">下一位</button>
+                <button id="next-round-btn" class="initiative-round-btn" type="button">下一輪</button>
+                <button id="reset-combat-btn" class="initiative-reset-btn" type="button">重置回合數</button>
+            </div>
+        </section>
+
+        <div class="topbar-actions">
+
+            <div id="theme-switcher" class="theme-switcher">
+                <button id="theme-button" class="theme-button" type="button" aria-haspopup="true" aria-expanded="false">
+                    <span class="theme-palette-icon" aria-hidden="true">✦</span>
+                    <span class="theme-button-copy">
+                        <small>美術風格</small>
+                        <strong id="theme-label">哥德聖堂</strong>
+                    </span>
+                    <span class="theme-chevron">⌄</span>
+                </button>
+
+                <div id="theme-menu" class="theme-menu hidden" role="menu">
+                    <button class="theme-option active" data-theme-option="gothic" type="button" role="menuitem">
+                        <span class="theme-preview theme-preview-gothic"></span>
+                        <span>
+                            <strong>哥德聖堂</strong>
+                            <small>黑石、金飾、暗紅與教堂感</small>
+                        </span>
+                        <i>✓</i>
+                    </button>
+
+                    <button class="theme-option" data-theme-option="guild" type="button" role="menuitem">
+                        <span class="theme-preview theme-preview-guild"></span>
+                        <span>
+                            <strong>黃昏公會</strong>
+                            <small>皮革、羊皮紙、古代地圖感</small>
+                        </span>
+                        <i></i>
+                    </button>
+                </div>
+            </div>
+            <button id="stat-mode-btn" class="toolbar-btn" type="button">數字</button>
+            <div class="zoom-control">
+                <button id="zoom-out-btn" type="button">−</button>
+                <button id="zoom-reset-btn" type="button"><span id="zoom-label">100%</span></button>
+                <button id="zoom-in-btn" type="button">＋</button>
+            </div>
+        </div>
+    </header>
+
+    <nav class="activity-rail" aria-label="側邊功能列">
+        <div class="activity-top">
+            <button id="view-party-btn" class="activity-btn" type="button" title="角色列表" aria-label="角色列表">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="8" r="3.2"></circle>
+                    <path d="M5.5 19c.7-4 3-6 6.5-6s5.8 2 6.5 6"></path>
+                </svg>
+                <span id="party-count" class="activity-count">0</span>
+            </button>
+
+            <button id="view-enemy-btn" class="activity-btn enemy-activity" type="button" title="敵人資訊" aria-label="敵人資訊">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M7 7 4 3v6c0 5 3.5 9 8 9s8-4 8-9V3l-3 4"></path>
+                    <circle cx="9" cy="11" r="1"></circle>
+                    <circle cx="15" cy="11" r="1"></circle>
+                    <path d="M9 15h6"></path>
+                </svg>
+                <span id="enemy-count" class="activity-count">0</span>
+            </button>
+
+            <button id="view-rules-btn" class="activity-btn rules-activity" type="button" title="規則介紹" aria-label="規則介紹">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 4.5A2.5 2.5 0 0 1 7.5 2H19v17H7.5A2.5 2.5 0 0 0 5 21.5z"></path>
+                    <path d="M5 4.5v17"></path>
+                    <path d="M9 7h6"></path>
+                    <path d="M9 11h6"></path>
+                </svg>
+            </button>
+        </div>
+
+        <button id="collapse-sidebar-btn" class="activity-btn collapse-btn" type="button" title="收合側欄" aria-label="收合側欄">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 6-6 6 6 6"></path></svg>
+        </button>
+    </nav>
+
+    <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <div>
+                <span id="sidebar-kicker" class="eyebrow">PARTY</span>
+                <h2 id="sidebar-title">角色列表</h2>
+            </div>
+            <span id="sidebar-sort-hint" class="sort-hint">依速度排序</span>
+        </div>
+
+        <div class="search-box">
+            <span>⌕</span>
+            <input id="character-search" type="search" placeholder="搜尋角色…" autocomplete="off">
+        </div>
+
+        <div id="character-list" class="character-list"></div>
+
+        <button id="open-create-btn" class="add-character-btn" type="button">
+            <span>＋</span> <span id="add-character-label">新增角色</span>
+        </button>
+
+        <section id="rules-panel" class="rules-panel hidden" aria-label="規則介紹">
+            <div class="rules-panel-heading">
+                <span class="eyebrow">RULEBOOK</span>
+                <h2>規則介紹</h2>
+                <p>《漆黑大陸》－規則頁</p>
+            </div>
+            <div id="rules-list" class="rules-list"></div>
+        </section>
+    </aside>
+
+    <main id="viewport">
+        <div class="battlefield-hint">
+            <strong>BATTLEFIELD</strong>
+            <span>拖曳空白處移動畫面 · 滾輪縮放 · 空白處右鍵新增戰場</span>
+        </div>
         <div id="world"></div>
+    </main>
+
+
+    <aside id="chat-panel" class="chat-panel">
+        <header class="chat-header">
+            <div>
+                <span class="eyebrow">COMMUNICATION</span>
+                <h2>通訊</h2>
+            </div>
+
+            <div class="chat-header-actions">
+                <button id="chat-clear-btn" class="chat-clear-btn" type="button" title="清空目前頁面紀錄">清空</button>
+                <button id="chat-collapse-btn" class="chat-collapse-btn" type="button" title="收合聊天室">›</button>
+            </div>
+        </header>
+
+        <div class="chat-tabs">
+            <button id="chat-tab-combat" class="chat-tab active" type="button">戰鬥</button>
+            <button id="chat-tab-team" class="chat-tab" type="button">隊伍</button>
+            <button id="chat-tab-log" class="chat-tab" type="button">戰場紀錄</button>
+        </div>
+
+        <div id="chat-messages" class="chat-messages"></div>
+
+        <section id="combat-composer" class="combat-composer">
+
+            <section id="reaction-panel" class="reaction-panel hidden" aria-live="polite">
+                <div class="reaction-panel-head">
+                    <div>
+                        <span class="eyebrow">REACTION</span>
+                        <strong id="reaction-title">反應時點</strong>
+                    </div>
+                    <span id="reaction-context" class="reaction-context"></span>
+                </div>
+
+                <div id="reaction-options" class="reaction-options"></div>
+
+                <button id="reaction-skip-btn" class="reaction-skip-btn" type="button">
+                    放棄剩餘反應
+                </button>
+            </section>
+
+            <div class="combat-actor-select">
+                <button id="combat-actor" class="combat-actor" type="button">目前沒有行動角色</button>
+                <div id="combat-actor-menu" class="combat-actor-menu hidden"></div>
+            </div>
+
+            <div class="combat-skill-select">
+                <button id="combat-skill-btn" class="combat-skill-btn" type="button">
+                    <span>選擇戰技</span>
+                    <i>⌄</i>
+                </button>
+                <div id="combat-skill-menu" class="combat-skill-menu hidden"></div>
+            </div>
+
+            <div id="combat-step" class="combat-step hidden">
+                <div id="combat-target-title" class="combat-target-title">選擇目標</div>
+                <div id="combat-target-list" class="combat-target-list"></div>
+                <button id="combat-execute-btn" class="combat-execute-btn hidden" type="button">
+                    執行
+                </button>
+            </div>
+        </section>
+
+        <section id="team-composer" class="team-composer hidden">
+            <form id="team-message-form">
+                <div class="identity-select">
+                    <button id="chat-identity-btn" class="chat-identity-btn" type="button">選擇角色</button>
+                    <div id="chat-identity-menu" class="chat-identity-menu hidden"></div>
+                </div>
+
+                <div class="team-input-row">
+                    <input id="team-message-input" type="text" maxlength="2000" placeholder="輸入隊伍訊息…" autocomplete="off">
+                    <button type="submit">送出</button>
+                </div>
+            </form>
+        </section>
+
+        <div class="chat-collapsed-label">
+            <span>CHAT</span>
+        </div>
+    </aside>
+
+    <div id="grid-context-menu" class="context-menu hidden">
+        <div class="menu-caption">戰場</div>
+        <button id="menu-move" type="button">✥ 移動戰場</button>
+        <button id="menu-delete" class="danger" type="button">✕ 刪除戰場</button>
     </div>
 
+    <div id="battlefield-context-menu" class="context-menu hidden">
+        <div class="menu-caption">空白區域</div>
+        <button id="menu-add" type="button">▦ 生成戰場格</button>
+    </div>
 
+    <div id="token-context-menu" class="context-menu hidden">
+        <div class="menu-caption">戰場角色</div>
+        <button id="menu-token-sheet" type="button">▤ 查看角色卡</button>
+        <button id="menu-token-vacate" class="danger" type="button">↩ 移除戰場</button>
+    </div>
 
     <div id="create-modal" class="modal hidden">
-        <div class="modal-content">
-            <button id="close-create-btn" class="close-btn">×</button>
+        <section class="modal-panel character-create-panel">
+            <button class="modal-close" data-close-modal="create-modal" type="button">×</button>
+
+            <header class="modal-heading">
+                <span id="create-kicker" class="eyebrow">CHARACTER</span>
+                <h2 id="create-title">建立角色</h2>
+                <p id="create-description">建立角色後，可以從角色列表拖曳到戰場。</p>
+            </header>
 
             <form id="create-form">
-                <div class="top-section">
-                    <label for="input-image" class="image-preview">
-                        <img id="preview-img" src="" class="hidden">
-                        <span id="preview-placeholder">點擊上傳圖片</span>
+                <div class="create-top">
+                    <label class="image-picker" for="input-image">
+                        <img id="preview-img" class="hidden" alt="角色預覽">
+                        <span id="preview-placeholder"><b>＋</b>上傳圖片</span>
                     </label>
-                    <input type="file" id="input-image" accept="image/*" class="hidden-input">
+                    <input id="input-image" class="hidden" type="file" accept="image/*">
 
-                    <div class="basic-info">
-                        <div class="field-group">
-                            <input type="text" id="input-name" placeholder=" " required>
-                            <label for="input-name">名稱</label>
-                            <div class="underline underline-name"></div>
-                        </div>
-                        <div class="field-group">
-                            <input type="number" id="input-hp" placeholder=" " required>
-                            <label for="input-hp">HP</label>
-                            <div class="underline underline-hp"></div>
-                        </div>
-                        <div class="field-group">
-                            <input type="number" id="input-ap" placeholder=" " required>
-                            <label for="input-ap">AP</label>
-                            <div class="underline underline-ap"></div>
-                        </div>
-                        <div class="field-group">
-                            <input type="number" id="input-sp" placeholder=" " required>
-                            <label for="input-sp">SP</label>
-                            <div class="underline underline-sp"></div>
-                        </div>
+                    <div class="vital-fields">
+                        <label class="form-field wide"><span>名稱</span><input id="input-name" type="text" required></label>
+                        <label class="form-field wide">
+                            <span>職業</span>
+                            <select id="input-profession">
+                                <option value="">未選擇</option>
+                                <option value="闢路者">闢路者</option>
+                                <option value="堅守者">堅守者</option>
+                                <option value="霧行者">霧行者</option>
+                                <option value="織光者">織光者</option>
+                            </select>
+                        </label>
+                        <label class="form-field hp-field"><span>HP</span><input id="input-hp" type="number" min="0" required></label>
+                        <label class="form-field ap-field"><span>AP</span><input id="input-ap" type="number" min="0" required></label>
+                        <label class="form-field sp-field"><span>SP</span><input id="input-sp" type="number" min="0" required></label>
                     </div>
                 </div>
 
-                <div class="stats-grid">
-                    <div class="field-group">
-                        <input type="number" id="input-patk" placeholder=" " required>
-                        <label for="input-patk">物理攻擊</label>
-                        <div class="underline underline-patk"></div>
-                    </div>
-                    <div class="field-group">
-                        <input type="number" id="input-matk" placeholder=" " required>
-                        <label for="input-matk">魔法攻擊</label>
-                        <div class="underline underline-matk"></div>
-                    </div>
-                    <div class="field-group">
-                        <input type="number" id="input-crit" placeholder=" " required>
-                        <label for="input-crit">暴擊</label>
-                        <div class="underline underline-crit"></div>
-                    </div>
-                    <div class="field-group">
-                        <input type="number" id="input-hitRate" placeholder=" " required>
-                        <label for="input-hitRate">命中</label>
-                        <div class="underline underline-hitRate"></div>
-                    </div>
-                    <div class="field-group">
-                        <input type="number" id="input-dodge" placeholder=" " required>
-                        <label for="input-dodge">迴避</label>
-                        <div class="underline underline-dodge"></div>
-                    </div>
-                    <div class="field-group">
-                        <input type="number" id="input-speed" placeholder=" " required>
-                        <label for="input-speed">行動速度</label>
-                        <div class="underline underline-speed"></div>
-                    </div>
-                    <div class="field-group">
-                        <input type="number" id="input-defense" placeholder=" " required>
-                        <label for="input-defense">防禦</label>
-                        <div class="underline underline-defense"></div>
-                    </div>
-                    <div class="field-group">
-                        <input type="number" id="input-resist" placeholder=" " required>
-                        <label for="input-resist">魔抗</label>
-                        <div class="underline underline-resist"></div>
-                    </div>
+                <div class="section-title"><span>戰鬥能力</span></div>
+                <div class="stat-fields">
+                    <label class="form-field"><span>物理攻擊</span><input id="input-patk" type="number" required></label>
+                    <label class="form-field"><span>魔法攻擊</span><input id="input-matk" type="number" required></label>
+                    <label class="form-field"><span>暴擊率 %</span><input id="input-crit" type="number" min="0" step="1" required></label>
+                    <label class="form-field"><span>額外暴擊傷害 %</span><input id="input-critDamageBonus" type="number" min="0" step="1" value="0" required></label>
+                    <label class="form-field"><span>命中</span><input id="input-hitRate" type="number" required></label>
+                    <label class="form-field"><span>迴避</span><input id="input-dodge" type="number" required></label>
+                    <label class="form-field"><span>行動速度</span><input id="input-speed" type="number" required></label>
+                    <label class="form-field"><span>防禦</span><input id="input-defense" type="number" required></label>
+                    <label class="form-field"><span>魔抗</span><input id="input-resist" type="number" required></label>
+                    <label class="form-field"><span>格擋率 %</span><input id="input-blockRate" type="number" min="0" max="75" step="1" value="0" required></label>
+                    <label class="form-field"><span>戰技數量</span><input id="input-skillSlots" type="number" min="0" max="30" value="1" required></label>
                 </div>
 
-                <button type="submit" class="create-btn">創建角色</button>
+                <button class="primary-btn" type="submit"><span id="create-submit-label">建立角色</span></button>
             </form>
-        </div>
+        </section>
     </div>
-    <script src="app.js"></script>
-</body>
 
+    <div id="grid-modal" class="modal hidden">
+        <section class="modal-panel small-panel">
+            <button class="modal-close" data-close-modal="grid-modal" type="button">×</button>
+            <header class="modal-heading">
+                <span class="eyebrow">BATTLEFIELD</span>
+                <h2>建立戰場格</h2>
+                <p>設定這一塊戰場的列數與欄數。</p>
+            </header>
+
+            <form id="grid-form">
+                <div class="stat-fields two-columns">
+                    <label class="form-field"><span>高（列）</span><input id="input-row" type="number" min="1" max="50" required></label>
+                    <label class="form-field"><span>寬（欄）</span><input id="input-col" type="number" min="1" max="50" required></label>
+                </div>
+                <button class="primary-btn" type="submit">生成戰場</button>
+            </form>
+        </section>
+    </div>
+
+    <div id="character-sheet-modal" class="modal hidden">
+        <section class="modal-panel character-sheet-panel">
+            <button class="modal-close" data-close-modal="character-sheet-modal" type="button">×</button>
+
+            <header class="modal-heading sheet-heading-row">
+                <div>
+                    <span id="sheet-kicker" class="eyebrow">CHARACTER SHEET</span>
+                    <h2 id="sheet-name">角色</h2>
+                    <p>數值可以直接修改，完成後按「儲存修改」。</p>
+                </div>
+                <div id="sheet-buffs" class="sheet-buff-strip hidden"></div>
+            </header>
+
+            <div class="sheet-layout">
+                <div id="sheet-image-wrap" class="sheet-image-wrap"></div>
+
+                <div class="sheet-vitals editable-vitals">
+                    <div class="sheet-vital hp-field">
+                        <div>
+                            <span>HP</span>
+                            <label class="sheet-pair"><input id="sheet-hp-input" type="number" min="0"><b>/</b><input id="sheet-max-hp-input" type="number" min="0"></label>
+                        </div>
+                        <div class="sheet-bar"><i id="sheet-hp-fill"></i></div>
+                    </div>
+                    <div class="sheet-vital ap-field">
+                        <div>
+                            <span>AP</span>
+                            <label class="sheet-pair"><input id="sheet-ap-input" type="number" min="0"><b>/</b><input id="sheet-max-ap-input" type="number" min="0"></label>
+                        </div>
+                        <div class="sheet-bar"><i id="sheet-ap-fill"></i></div>
+                    </div>
+                    <div class="sheet-vital sp-field">
+                        <div>
+                            <span>SP</span>
+                            <label class="sheet-pair"><input id="sheet-sp-input" type="number" min="0"><b>/</b><input id="sheet-max-sp-input" type="number" min="0"></label>
+                        </div>
+                        <div class="sheet-bar"><i id="sheet-sp-fill"></i></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-title"><span>副能力</span></div>
+            <div class="sheet-stats editable-sheet-stats secondary-ability-grid">
+                <label><span>物理攻擊</span><input id="sheet-patk-input" type="number"></label>
+                <label><span>魔法攻擊</span><input id="sheet-matk-input" type="number"></label>
+                <label><span>暴擊率 %</span><input id="sheet-crit-input" type="number" min="0"></label>
+                <label><span>額外暴擊傷害 %</span><input id="sheet-critDamageBonus-input" type="number" min="0"></label>
+                <label><span>命中</span><input id="sheet-hitRate-input" type="number"></label>
+                <label><span>迴避</span><input id="sheet-dodge-input" type="number"></label>
+                <label><span>行動速度</span><input id="sheet-speed-input" type="number"></label>
+                <label><span>防禦</span><input id="sheet-defense-input" type="number"></label>
+                <label><span>魔抗</span><input id="sheet-resist-input" type="number"></label>
+                <label><span>格擋率 %</span><input id="sheet-blockRate-input" type="number" min="0" max="75" step="1"></label>
+                <label><span>戰技數量</span><input id="sheet-skillSlots-input" type="number" min="0" max="30"></label>
+            </div>
+
+            <div class="section-title"><span>職業與攜帶戰技</span></div>
+            <section class="skill-loadout-panel">
+                <label class="profession-field">
+                    <span>職業</span>
+                    <select id="sheet-profession-select">
+                        <option value="">未選擇</option>
+                        <option value="闢路者">闢路者</option>
+                        <option value="堅守者">堅守者</option>
+                        <option value="霧行者">霧行者</option>
+                        <option value="織光者">織光者</option>
+                    </select>
+                </label>
+
+                <div class="initial-skills-note">
+                    <span>初始戰技（固定）</span>
+                    <div id="initial-skill-tags"></div>
+                </div>
+
+                <div class="skill-slots-heading">
+                    <span>攜帶戰技</span>
+                    <small>格數依「戰技數量」決定；點擊格子選擇職業戰技或通用戰技。</small>
+                </div>
+
+                <div id="sheet-skill-slots" class="sheet-skill-slots"></div>
+            </section>
+
+            <div class="sheet-actions">
+                <button id="sheet-save-btn" class="primary-compact-btn" type="button">儲存修改</button>
+                <span class="sheet-action-spacer"></span>
+                <button id="sheet-vacate-btn" class="secondary-btn" type="button">從戰場移除</button>
+                <button id="sheet-delete-btn" class="danger-btn" type="button">刪除角色</button>
+            </div>
+        </section>
+    </div>
+
+
+    <div id="skill-picker-modal" class="modal hidden">
+        <section class="modal-panel skill-picker-panel">
+            <button class="modal-close" data-close-modal="skill-picker-modal" type="button">×</button>
+
+            <header class="modal-heading">
+                <span class="eyebrow">SKILL LOADOUT</span>
+                <h2>選擇攜帶戰技</h2>
+                <p>戰技資料依《漆黑大陸》的四職業分頁與「通用戰技」整理。攻擊、恢復、格擋與多項 Buff 已開始接入實際戰鬥計算。</p>
+            </header>
+
+            <div id="skill-picker-current" class="skill-picker-current"></div>
+            <div id="skill-picker-list" class="skill-picker-list"></div>
+        </section>
+    </div>
+
+    <div id="buff-modal" class="modal hidden">
+        <section class="modal-panel buff-modal-panel">
+            <button class="modal-close" data-close-modal="buff-modal" type="button">×</button>
+            <header class="modal-heading">
+                <span class="eyebrow">STATUS</span>
+                <h2>新增 Buff／Debuff／狀態</h2>
+                <p>套用到 <strong id="buff-target-name">角色</strong>。可手動加入目前系統中的 Buff、Debuff 與特殊狀態；數值型效果會直接參與戰鬥計算。</p>
+            </header>
+            <div id="buff-choice-list" class="buff-choice-list"></div>
+        </section>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="/theme.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="module" src="/js/app.js"></script>
+</body>
 </html>

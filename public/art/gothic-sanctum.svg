@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="960" viewBox="0 0 960 960">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1118"/>
+      <stop offset=".55" stop-color="#111821"/>
+      <stop offset="1" stop-color="#090d12"/>
+    </linearGradient>
+    <radialGradient id="glass">
+      <stop offset="0" stop-color="#7b2038" stop-opacity=".26"/>
+      <stop offset=".4" stop-color="#321b4b" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#071017" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="stone" width="96" height="64" patternUnits="userSpaceOnUse">
+      <path d="M0 0H96M0 32H96M0 64H96M48 0V32M24 32V64M72 32V64"
+            fill="none" stroke="#94a1ac" stroke-opacity=".045" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="960" height="960" fill="url(#bg)"/>
+  <rect width="960" height="960" fill="url(#stone)"/>
+  <circle cx="720" cy="190" r="300" fill="url(#glass)"/>
+  <g fill="none" stroke="#b58a46" stroke-opacity=".12">
+    <path d="M80 960V430Q80 170 260 92Q440 170 440 430V960" stroke-width="3"/>
+    <path d="M520 960V430Q520 170 700 92Q880 170 880 430V960" stroke-width="3"/>
+    <path d="M111 960V447Q111 230 260 157Q409 230 409 447V960"/>
+    <path d="M551 960V447Q551 230 700 157Q849 230 849 447V960"/>
+  </g>
+  <g fill="none" stroke="#6d2948" stroke-opacity=".10" stroke-width="2">
+    <circle cx="260" cy="276" r="74"/>
+    <circle cx="260" cy="276" r="47"/>
+    <path d="M260 202V350M186 276H334M208 224L312 328M312 224L208 328"/>
+    <circle cx="700" cy="276" r="74"/>
+    <circle cx="700" cy="276" r="47"/>
+    <path d="M700 202V350M626 276H774M648 224L752 328M752 224L648 328"/>
+  </g>
+</svg>
