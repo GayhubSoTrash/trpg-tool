@@ -1,15 +1,22 @@
 import { api } from './api.js';
 import { socket } from './socket.js';
-import { createImageOrInitial, showToast } from './ui.js';
+import { createImageOrInitial, escapeHtml, showToast } from './ui.js';
 
 const panel = document.getElementById('chat-panel');
 const collapseButton = document.getElementById('chat-collapse-btn');
 const clearButton = document.getElementById('chat-clear-btn');
 const reactionPanel = document.getElementById('reaction-panel');
+const reactionPeers = document.getElementById('reaction-peers');
 const reactionTitle = document.getElementById('reaction-title');
 const reactionContext = document.getElementById('reaction-context');
 const reactionOptions = document.getElementById('reaction-options');
 const reactionSkipButton = document.getElementById('reaction-skip-btn');
+const reactionDefaultSkipButton = document.getElementById('reaction-default-skip-btn');
+const reactionDefaultBar = document.getElementById('reaction-default-bar');
+const timingPickPanel = document.getElementById('timing-pick-panel');
+const timingPickTitle = document.getElementById('timing-pick-title');
+const timingPickContext = document.getElementById('timing-pick-context');
+const timingPickOptions = document.getElementById('timing-pick-options');
 const battleTab = document.getElementById('chat-tab-combat');
 const teamTab = document.getElementById('chat-tab-team');
 const logTab = document.getElementById('chat-tab-log');
@@ -46,6 +53,8 @@ let selectedDirection = null;
 let loadedSkillActorId = null;
 let loadedSkillSignature = '';
 let currentReactionWindow = null;
+let currentReactionPeers = [];
+let currentTimingPick = null;
 let reactionBusy = false;
 
 function characterById(id) {
@@ -249,11 +258,15 @@ function renderCombatActor() {
     if (!actor) {
         combatActor.textContent = '選擇戰技操作者';
         skillButton.disabled = true;
+        syncReactionDefaultSkipButton();
         return;
     }
 
-    skillButton.disabled = false;
-    combatActor.title = '點擊切換戰技操作者';
+    const knockedOut = isActorUnableToAct(actor);
+    skillButton.disabled = knockedOut;
+    combatActor.title = knockedOut
+        ? `${actor.name} 已擊倒，無法發動戰技`
+        : '點擊切換戰技操作者';
     combatActor.appendChild(renderAvatar(actor, 'identity-avatar'));
 
     const copy = document.createElement('span');
@@ -276,6 +289,7 @@ function renderCombatActor() {
     arrow.textContent = '⌄';
 
     combatActor.append(copy, hint, arrow);
+    syncReactionDefaultSkipButton();
 }
 
 function renderCombatActorMenu() {
@@ -330,43 +344,132 @@ function selectedSkill() {
 function reactionTriggerLabel(window) {
     if (!window) return '反應時點';
 
-    if (window.triggerType === 'attack_declared') {
-        return '攻擊指定・反應時點';
+    const code = window.triggerType || window.context?.timingCode;
+    if (
+        code === 'ON_TARGET_DECLARED' ||
+        code === 'attack_declared'
+    ) {
+        return '指定目標時・反應時點';
     }
 
-    return '戰技結算後・可用反應';
+    if (window.context?.timingLabel) {
+        return `${window.context.timingLabel}・可用反應`;
+    }
+
+    if (
+        code === 'AFTER_SKILL' ||
+        code === 'AFTER_DAMAGE' ||
+        code === 'AFTER_ATTACK' ||
+        code === 'post_action'
+    ) {
+        return '發動戰技後・可用反應';
+    }
+
+    return '反應時點';
 }
 
 function reactionContextText(window) {
     if (!window) return '';
 
     const context = window.context || {};
+    const code = window.triggerType || context.timingCode;
 
-    if (window.triggerType === 'attack_declared') {
+    if (
+        code === 'ON_TARGET_DECLARED' ||
+        code === 'attack_declared'
+    ) {
         return `${context.actorName || '角色'}「${context.skillName || '攻擊'}」→ ${context.targetName || '目標'}`;
     }
 
-    return `${context.actorName || '角色'}「${context.skillName || '戰技'}」結算完成`;
+    return `${context.actorName || '角色'}「${context.skillName || '戰技'}」・${context.timingLabel || '時點'}`;
+}
+
+function renderReactionPeers(peers = []) {
+    if (!reactionPeers) return;
+    reactionPeers.innerHTML = '';
+    currentReactionPeers = Array.isArray(peers) ? peers : [];
+
+    if (!currentReactionPeers.length) {
+        reactionPeers.classList.add('hidden');
+        return;
+    }
+
+    reactionPeers.classList.remove('hidden');
+    for (const peer of currentReactionPeers) {
+        const chip = document.createElement('div');
+        chip.className = 'reaction-peer-chip';
+        const waiting = peer.status === 'open' || peer.status === 'queued';
+        chip.dataset.waiting = waiting ? 'true' : 'false';
+        const speedLabel = peer.reactorSpeed != null
+            ? `速${peer.reactorSpeed}`
+            : '';
+        const statusLabel = peer.status === 'queued'
+            ? '速度順序等待中'
+            : peer.status === 'open'
+                ? '選擇反應中'
+                : peer.status;
+        chip.innerHTML = `
+            <strong>${escapeHtml(peer.reactorName || `角色#${peer.reactorId}`)}</strong>
+            <small>${escapeHtml([speedLabel, statusLabel].filter(Boolean).join('・'))}</small>
+        `;
+        reactionPeers.appendChild(chip);
+    }
+}
+
+function isActorUnableToAct(actor = currentActor()) {
+    return !actor || Number(actor.hp) <= 0;
+}
+
+function syncSkillButtonAvailability() {
+    const actor = currentActor();
+    const knockedOut = isActorUnableToAct(actor);
+    const blocking = Boolean(
+        currentReactionWindow &&
+        ['open', 'ready'].includes(currentReactionWindow.status) &&
+        currentReactionWindow.blocking
+    );
+    skillButton.disabled = knockedOut || blocking;
+}
+
+function syncReactionDefaultSkipButton() {
+    if (!reactionDefaultSkipButton) return;
+    const actor = currentActor();
+    const enabled = Boolean(actor?.reactionDefaultSkip);
+    // Always visible while an action actor is selected (not only during windows).
+    reactionDefaultBar?.classList.toggle('hidden', !actor);
+    reactionDefaultSkipButton.classList.toggle('is-on', enabled);
+    reactionDefaultSkipButton.textContent = enabled
+        ? '已默認不反應（點擊取消）'
+        : '默認不做反應';
+    reactionDefaultSkipButton.disabled = !actor || reactionBusy;
 }
 
 function renderReactionPanel() {
     reactionOptions.innerHTML = '';
+    syncReactionDefaultSkipButton();
 
     if (
         !currentReactionWindow ||
         !['open', 'ready'].includes(currentReactionWindow.status)
     ) {
         reactionPanel.classList.add('hidden');
-        skillButton.disabled = false;
+        syncSkillButtonAvailability();
+        // Still show peer chips when others are choosing.
+        if (!currentReactionPeers.length) {
+            reactionPeers?.classList.add('hidden');
+        }
         return;
     }
 
     reactionPanel.classList.remove('hidden');
-    reactionTitle.textContent = reactionTriggerLabel(currentReactionWindow);
+    const reactorLabel = currentReactionWindow.reactorName ||
+        currentReactionWindow.options?.[0]?.actorName ||
+        '反應';
+    reactionTitle.textContent = `${reactorLabel}・${reactionTriggerLabel(currentReactionWindow)}`;
     reactionContext.textContent = reactionContextText(currentReactionWindow);
 
     const blocking = currentReactionWindow.blocking === true;
-    skillButton.disabled = blocking;
+    syncSkillButtonAvailability();
 
     if (currentReactionWindow.status === 'ready') {
         const row = document.createElement('div');
@@ -381,10 +484,7 @@ function renderReactionPanel() {
     }
 
     reactionSkipButton.classList.remove('hidden');
-    reactionSkipButton.textContent =
-        blocking
-            ? '放棄反應，繼續受擊'
-            : '結束這個反應時點';
+    reactionSkipButton.textContent = '本次不反應';
 
     for (const option of currentReactionWindow.options || []) {
         const button = document.createElement('button');
@@ -392,20 +492,25 @@ function renderReactionPanel() {
         button.className = 'reaction-option';
         button.disabled = reactionBusy;
 
+        const pickHint = option.needsPick
+            ? `<small class="reaction-pick-hint">需先選擇：${escapeHtml(option.needsPick)}</small>`
+            : '';
+
         button.innerHTML = `
             <div class="reaction-option-head">
-                <span class="reaction-actor-mark">${option.actorName?.slice(0, 1) || '?'}</span>
+                <span class="reaction-actor-mark">${escapeHtml(option.actorName?.slice(0, 1) || '?')}</span>
                 <div>
-                    <strong>${option.actorName}・${option.skillName}</strong>
-                    <small>${option.cost}・${option.timing}</small>
+                    <strong>${escapeHtml(option.skillName)}</strong>
+                    <small>${escapeHtml(option.cost)}・${escapeHtml(option.timing)}</small>
                 </div>
             </div>
-            <p>${option.note || option.effect}</p>
-            <em>${option.effect}</em>
+            <p>${escapeHtml(option.note || option.effect)}</p>
+            ${pickHint}
+            <em>${escapeHtml(option.effect)}</em>
         `;
 
         button.addEventListener('click', () => {
-            useReactionOption(option.id);
+            beginReactionOption(option);
         });
 
         reactionOptions.appendChild(button);
@@ -423,13 +528,95 @@ async function resumeReactionAttack(window) {
     const response = await api.useCombatSkill(payload);
 
     if (response?.message) appendMessage(response.message);
+    if (response?.pickRequest) {
+        showTimingPick(response.pickRequest, payload);
+    }
 
-    currentReactionWindow = response?.reactionWindow || null;
-    renderReactionPanel();
+    if (response?.resume && response?.reactionWindow?.status === 'ready') {
+        currentReactionWindow = response.reactionWindow;
+        renderReactionPanel();
+        await resumeReactionAttack(response.reactionWindow);
+        return;
+    }
+
+    await loadOpenReaction();
+}
+
+function hideTimingPick() {
+    currentTimingPick = null;
+    timingPickPanel?.classList.add('hidden');
+    if (timingPickOptions) timingPickOptions.innerHTML = '';
+}
+
+function showTimingPick(pickRequest, resumeBase = null) {
+    currentTimingPick = { pickRequest, resumeBase };
+    if (!timingPickPanel || !timingPickOptions) return;
+
+    timingPickPanel.classList.remove('hidden');
+    if (timingPickTitle) {
+        timingPickTitle.textContent = pickRequest.prompt || '選擇適用目標';
+    }
+    if (timingPickContext) {
+        timingPickContext.textContent = pickRequest.skillName || '';
+    }
+
+    timingPickOptions.innerHTML = '';
+    for (const id of pickRequest.candidateIds || []) {
+        const character = characterById(id);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'reaction-option';
+        button.innerHTML = `
+            <div class="reaction-option-head">
+                <strong>${escapeHtml(character?.name || `角色 #${id}`)}</strong>
+            </div>
+            <p>套用「${escapeHtml(pickRequest.skillName || '效果')}」</p>
+        `;
+        button.addEventListener('click', () => {
+            confirmTimingPick(id);
+        });
+        timingPickOptions.appendChild(button);
+    }
+}
+
+async function confirmTimingPick(pickedTargetId) {
+    if (!currentTimingPick?.pickRequest) return;
+    const base = currentTimingPick.resumeBase || {
+        actorId: selectedActionActorId,
+        skillKey: selectedSkillKey,
+        targetId: selectedTargetId
+    };
+
+    try {
+        hideTimingPick();
+        const response = await api.useCombatSkill({
+            ...base,
+            pickedTargetId,
+            reactionResumeId: base.reactionResumeId || undefined
+        });
+        if (response?.message) appendMessage(response.message);
+        if (response?.pickRequest) {
+            showTimingPick(response.pickRequest, {
+                ...base,
+                reactionResumeId: response.reactionWindow?.id
+            });
+        }
+        if (response?.reactionWindow) {
+            currentReactionWindow = response.reactionWindow;
+            renderReactionPanel();
+        }
+        document.dispatchEvent(new Event('trpg:reload-characters'));
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
 }
 
 async function handleReactionResponse(response) {
     if (response?.message) appendMessage(response.message);
+
+    if (Array.isArray(response?.peers)) {
+        renderReactionPeers(response.peers);
+    }
 
     const window = response?.window || null;
 
@@ -446,15 +633,175 @@ async function handleReactionResponse(response) {
         return;
     }
 
-    currentReactionWindow =
-        window && window.status === 'open'
-            ? window
-            : null;
+    if (window && window.status === 'open') {
+        currentReactionWindow = window;
+        renderReactionPanel();
+        return;
+    }
 
+    // This character finished; keep peers visible and pick up own/next state.
+    currentReactionWindow = null;
     renderReactionPanel();
+    await loadOpenReaction();
 }
 
-async function useReactionOption(optionId) {
+async function toggleReactionDefaultSkip() {
+    const actor = currentActor();
+    if (!actor || reactionBusy) return;
+
+    reactionBusy = true;
+    syncReactionDefaultSkipButton();
+    try {
+        const enabled = !Boolean(actor.reactionDefaultSkip);
+        const response = await api.setReactionDefaultSkip(actor.id, enabled);
+        if (response?.character) {
+            const idx = characters.findIndex(item => item.id === actor.id);
+            if (idx >= 0) characters[idx] = {
+                ...characters[idx],
+                ...response.character
+            };
+        }
+        document.dispatchEvent(new CustomEvent('trpg:characters-updated', {
+            detail: { characters }
+        }));
+        showToast(
+            enabled
+                ? `${actor.name} 已設為默認不做反應`
+                : `${actor.name} 已取消默認不做反應`
+        );
+        if (response?.resume) {
+            await handleReactionResponse({
+                resume: true,
+                window: response.resume
+            });
+        } else {
+            await loadOpenReaction();
+        }
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        reactionBusy = false;
+        syncReactionDefaultSkipButton();
+        renderReactionPanel();
+    }
+}
+
+async function beginReactionOption(option) {
+    if (!currentReactionWindow || reactionBusy || !option) return;
+
+    const choices = option.pickChoices || [];
+    if (
+        option.needsPick &&
+        choices.length === 0 &&
+        option.skipPickIfEmpty
+    ) {
+        await useReactionOption(option.id, option.autoMetaIfEmpty || {});
+        return;
+    }
+
+    if (option.needsPick && choices.length) {
+        showReactionPick(option);
+        return;
+    }
+
+    if (option.needsPick && !choices.length) {
+        showToast('目前沒有可選項目', 'error');
+        return;
+    }
+
+    await useReactionOption(option.id);
+}
+
+function showReactionPick(option, phase = 'primary') {
+    if (!timingPickPanel || !timingPickOptions) {
+        useReactionOption(option.id);
+        return;
+    }
+
+    currentTimingPick = {
+        kind: 'reaction',
+        option,
+        reactionId: currentReactionWindow.id,
+        phase,
+        pendingMeta: currentTimingPick?.pendingMeta || {}
+    };
+
+    timingPickPanel.classList.remove('hidden');
+    if (timingPickTitle) {
+        timingPickTitle.textContent =
+            phase === 'ally'
+                ? `選擇「${option.skillName}」的友方目標`
+                : option.skillName
+                    ? `選擇「${option.skillName}」的參數`
+                    : '選擇反應參數';
+    }
+    if (timingPickContext) {
+        timingPickContext.textContent = option.note || option.effect || '';
+    }
+
+    timingPickOptions.innerHTML = '';
+
+    if (phase === 'ally') {
+        const allies = (characters || []).filter(item =>
+            item.id !== option.actorId &&
+            (item.kind || 'player') === (option.actorKind || 'player') &&
+            Number(item.hp) > 0
+        );
+        for (const ally of allies) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'reaction-option';
+            button.innerHTML = `
+                <div class="reaction-option-head">
+                    <strong>${escapeHtml(ally.name)}</strong>
+                </div>
+            `;
+            button.addEventListener('click', async () => {
+                const meta = {
+                    ...(currentTimingPick?.pendingMeta || {}),
+                    allyId: ally.id,
+                    targetId: ally.id,
+                    pickedTargetId: ally.id
+                };
+                hideTimingPick();
+                await useReactionOption(option.id, meta);
+            });
+            timingPickOptions.appendChild(button);
+        }
+        return;
+    }
+
+    for (const choice of option.pickChoices || []) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'reaction-option';
+        button.innerHTML = `
+            <div class="reaction-option-head">
+                <strong>${escapeHtml(choice.label || choice.id)}</strong>
+            </div>
+        `;
+        button.addEventListener('click', async () => {
+            const meta = { ...(choice.meta || {}) };
+            if (option.needsSecondaryPick === 'ally_other') {
+                currentTimingPick = {
+                    kind: 'reaction',
+                    option,
+                    pendingMeta: meta
+                };
+                showReactionPick(option, 'ally');
+                return;
+            }
+            hideTimingPick();
+            await useReactionOption(option.id, {
+                ...meta,
+                targetId: meta.targetId || meta.redirectTargetId || choice.id
+            });
+        });
+        timingPickOptions.appendChild(button);
+    }
+}
+
+async function useReactionOption(optionId, meta = {}) {
     if (!currentReactionWindow || reactionBusy) return;
 
     reactionBusy = true;
@@ -465,7 +812,9 @@ async function useReactionOption(optionId) {
             currentReactionWindow.id,
             {
                 action: 'use',
-                optionId
+                optionId,
+                meta,
+                targetId: meta.targetId || meta.redirectTargetId || undefined
             }
         );
         await handleReactionResponse(response);
@@ -503,29 +852,52 @@ async function skipReactionWindow() {
 
 async function loadOpenReaction() {
     try {
-        const window = await api.getOpenReaction();
+        const state = await api.getOpenReaction(selectedActionActorId);
+        // Backward compatible if API still returns a bare window.
+        const mine = state?.mine !== undefined
+            ? state.mine
+            : (state?.id ? state : null);
+        const peers = Array.isArray(state?.peers) ? state.peers : [];
+        const resume = state?.resume || null;
 
-        currentReactionWindow = window || null;
+        renderReactionPeers(peers);
+        currentReactionWindow = mine || null;
         renderReactionPanel();
 
-        // 若上一個瀏覽器已經選好反應但尚未完成原攻擊，
-        // 重新整理後也可以接著結算。
         if (
-            window?.blocking &&
-            window?.status === 'ready' &&
-            window?.resumePayload &&
+            resume?.blocking &&
+            resume?.status === 'ready' &&
+            resume?.resumePayload &&
             !reactionBusy
         ) {
             reactionBusy = true;
             try {
-                await resumeReactionAttack(window);
+                await resumeReactionAttack(resume);
             } catch (error) {
-                // 可能已由另一名玩家搶先結算；重新讀一次即可。
                 await new Promise(resolve => setTimeout(resolve, 100));
-                currentReactionWindow = await api.getOpenReaction();
-                renderReactionPanel();
+                await loadOpenReaction();
             } finally {
                 reactionBusy = false;
+                renderReactionPanel();
+            }
+            return;
+        }
+
+        if (
+            mine?.blocking &&
+            mine?.status === 'ready' &&
+            mine?.resumePayload &&
+            !reactionBusy
+        ) {
+            reactionBusy = true;
+            try {
+                await resumeReactionAttack(mine);
+            } catch (error) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                await loadOpenReaction();
+            } finally {
+                reactionBusy = false;
+                renderReactionPanel();
             }
         }
     } catch (error) {
@@ -541,14 +913,17 @@ function renderSkillMenu() {
         button.type = 'button';
         const actionClass = String(skill.actionCode || 'UTILITY').toLowerCase();
         button.className = `skill-option action-${actionClass}`;
-        button.disabled = skill.manual === false || skill.actionCode === 'PASSIVE';
+        // 無限可能的呼喚 is flagged passive server-side but is cast by hand.
+        button.disabled =
+            (skill.manual === false || skill.actionCode === 'PASSIVE') &&
+            skill.logicCode !== 'INFINITE_CALL';
 
         button.innerHTML = `
             <div>
-                <strong>${skill.name}</strong>
-                <small>${skill.timing}・${skill.cost}・${skill.weapon}・${skill.actionCode || ''}</small>
+                <strong>${escapeHtml(skill.name)}</strong>
+                <small>${escapeHtml(skill.timing)}・${escapeHtml(skill.cost)}・${escapeHtml(skill.weapon)}・${escapeHtml(skill.actionCode || '')}</small>
             </div>
-            <p>${skill.effect}</p>
+            <p>${escapeHtml(skill.effect)}</p>
         `;
 
         button.addEventListener('click', () => {
@@ -580,6 +955,17 @@ function targetCandidates(skill, actor) {
                 character.id !== actor.id &&
                 Number(character.hp) > 0
         );
+    }
+
+    // 移轉一類：友方移動或敵方攻擊，同一指定入口。
+    if (code === 'ALLY_OR_ENEMY') {
+        return characters.filter(character => {
+            if (Number(character.hp) <= 0) return false;
+            if (requiresOtherAlly && sameSide(character) && character.id === actor.id) {
+                return false;
+            }
+            return true;
+        });
     }
 
     // 攻擊 / 敵方減益：只出現仍存活的敵方。
@@ -637,7 +1023,7 @@ function targetLabel(skill) {
     if (
         skill?.actionCode === 'ATTACK' ||
         skill?.actionCode === 'DEBUFF' ||
-        ['ENEMY','ENEMY_ROW','ENEMY_COLUMN','ALL_ENEMIES','ANY_ORTHOGONAL'].includes(code)
+        ['ENEMY','ENEMY_ROW','ENEMY_COLUMN','ALL_ENEMIES','ANY_ORTHOGONAL','ALLY_OR_ENEMY'].includes(code)
     ) {
         if (code === 'ENEMY_ROW') {
             if (skill?.targetShape === 'ROW_ADJACENT_2') {
@@ -656,6 +1042,7 @@ function targetLabel(skill) {
         }
         if (code === 'ALL_ENEMIES') return '全體敵方';
         if (code === 'ANY_ORTHOGONAL') return '選擇前／後／左／右方向上的角色';
+        if (code === 'ALLY_OR_ENEMY') return '選擇其他友方或敵方';
         return '選擇敵方目標';
     }
 
@@ -795,7 +1182,7 @@ function renderCombatStep() {
         button.appendChild(renderAvatar(target, 'combat-target-avatar'));
 
         const text = document.createElement('div');
-        text.innerHTML = `<strong>${target.name}</strong><small>HP ${target.hp}/${target.maxHp}</small>`;
+        text.innerHTML = `<strong>${escapeHtml(target.name)}</strong><small>HP ${escapeHtml(target.hp)}/${escapeHtml(target.maxHp)}</small>`;
         button.appendChild(text);
         button.addEventListener('click', () => {
             selectedTargetId = target.id;
@@ -818,6 +1205,26 @@ async function executeSkill() {
 
     if (!actor || !skill || !selectedTargetId) return;
 
+    if (Number(actor.hp) <= 0) {
+        showToast(`${actor.name} 已擊倒，無法發動戰技`, 'error');
+        return;
+    }
+
+    // 點擊當下先擋資源不足，避免進伺服器後才在指定／反應之後失敗。
+    const costMatch = String(skill.cost || '').match(/(\d+)\s*(AP|SP)/i);
+    if (costMatch) {
+        const amount = Number(costMatch[1]);
+        const type = costMatch[2].toUpperCase() === 'AP' ? 'ap' : 'sp';
+        const current = Number(actor[type] || 0);
+        if (current < amount) {
+            showToast(
+                `${actor.name} 的 ${type.toUpperCase()} 不足（需要 ${amount}，目前 ${current}）`,
+                'error'
+            );
+            return;
+        }
+    }
+
     executeButton.disabled = true;
 
     try {
@@ -830,9 +1237,22 @@ async function executeSkill() {
 
         if (response?.message) appendMessage(response.message);
 
-        if (response?.reactionWindow) {
-            currentReactionWindow = response.reactionWindow;
-            renderReactionPanel();
+        if (response?.pickRequest) {
+            showTimingPick(response.pickRequest, {
+                actorId: actor.id,
+                skillKey: skill.key,
+                targetId: selectedTargetId,
+                direction: selectedDirection
+            });
+        }
+
+        if (response?.resume && response?.reactionWindow?.status === 'ready') {
+            await handleReactionResponse({
+                resume: true,
+                window: response.reactionWindow
+            });
+        } else {
+            await loadOpenReaction();
         }
 
         selectedSkillKey = null;
@@ -948,6 +1368,7 @@ function initEvents() {
     logTab.addEventListener('click', () => setChannel('log'));
     clearButton.addEventListener('click', clearCurrentChannel);
     reactionSkipButton.addEventListener('click', skipReactionWindow);
+    reactionDefaultSkipButton?.addEventListener('click', toggleReactionDefaultSkip);
 
     function toggleChatPanel() {
         document.body.classList.toggle('chat-collapsed');
@@ -1045,6 +1466,8 @@ function initEvents() {
         renderCombatActor();
         renderCombatActorMenu();
         loadSkills(selectedActionActorId, true);
+        syncReactionDefaultSkipButton();
+        loadOpenReaction();
     });
 
     document.addEventListener('trpg:combat-state', event => {
@@ -1064,15 +1487,41 @@ function initEvents() {
         if (activeChannel === 'log') renderMessages();
     });
 
-    socket?.on('combat:reaction-opened', window => {
-        currentReactionWindow = window || null;
-        renderReactionPanel();
+    socket?.on('combat:reaction-opened', () => {
+        loadOpenReaction();
     });
 
-    socket?.on('combat:reaction-updated', window => {
-        currentReactionWindow = window || null;
-        renderReactionPanel();
+    socket?.on('combat:reaction-batch', () => {
+        loadOpenReaction();
+    });
 
+    socket?.on('combat:auto-cast', async payload => {
+        const queue = payload?.queue || [];
+        for (const item of queue) {
+            try {
+                const response = await api.useCombatSkill({
+                    actorId: item.actorId,
+                    skillKey: item.skillKey,
+                    targetId: item.targetId,
+                    autoCast: true
+                });
+                if (response?.message) appendMessage(response.message);
+                await loadOpenReaction();
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        }
+    });
+
+    socket?.on('combat:timing-pick', pickRequest => {
+        showTimingPick(pickRequest, {
+            actorId: selectedActionActorId,
+            skillKey: selectedSkillKey,
+            targetId: selectedTargetId
+        });
+    });
+
+    socket?.on('combat:reaction-updated', async window => {
         if (
             window?.blocking &&
             window?.status === 'ready' &&
@@ -1080,23 +1529,23 @@ function initEvents() {
             !reactionBusy
         ) {
             reactionBusy = true;
-            resumeReactionAttack(window)
-                .catch(() => {})
-                .finally(() => {
-                    reactionBusy = false;
-                    renderReactionPanel();
-                });
+            try {
+                currentReactionWindow = window;
+                renderReactionPanel();
+                await resumeReactionAttack(window);
+            } catch (error) {
+                // another client may resume first
+            } finally {
+                reactionBusy = false;
+                await loadOpenReaction();
+            }
+            return;
         }
+        await loadOpenReaction();
     });
 
-    socket?.on('combat:reaction-closed', event => {
-        if (
-            currentReactionWindow &&
-            Number(currentReactionWindow.id) === Number(event?.id)
-        ) {
-            currentReactionWindow = null;
-            renderReactionPanel();
-        }
+    socket?.on('combat:reaction-closed', async () => {
+        await loadOpenReaction();
     });
 
     socket?.on('chat:message', appendMessage);

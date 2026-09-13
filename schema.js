@@ -115,10 +115,12 @@ async function ensureSchema() {
             trigger_type TEXT NOT NULL,
             blocking BOOLEAN NOT NULL DEFAULT FALSE,
             status TEXT NOT NULL DEFAULT 'open'
-                CHECK (status IN ('open', 'ready', 'resolving', 'resolved', 'skipped', 'expired')),
+                CHECK (status IN ('open', 'ready', 'resolving', 'resolved', 'skipped', 'expired', 'queued')),
             source_actor_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
             source_target_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
             source_skill_key TEXT,
+            reactor_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+            batch_id TEXT,
             round_number INTEGER NOT NULL,
             turn_pass INTEGER NOT NULL,
             context JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -151,6 +153,15 @@ async function ensureSchema() {
         ALTER TABLE characters
         ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'player';
 
+        ALTER TABLE pending_actions
+        ADD COLUMN IF NOT EXISTS charge_required INTEGER NOT NULL DEFAULT 1;
+
+        ALTER TABLE pending_actions
+        ADD COLUMN IF NOT EXISTS charge_progress INTEGER NOT NULL DEFAULT 1;
+
+        ALTER TABLE pending_actions
+        ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb;
+
         ALTER TABLE characters
         ADD COLUMN IF NOT EXISTS profession TEXT NOT NULL DEFAULT '';
 
@@ -181,7 +192,10 @@ async function ensureSchema() {
         CREATE INDEX IF NOT EXISTS idx_cells_group_id ON cells(group_id);
         CREATE INDEX IF NOT EXISTS idx_cells_occupied_by ON cells(occupied_by);
         ALTER TABLE character_buffs
-        ADD COLUMN IF NOT EXISTS source_skill_key TEXT;
+        ADD COLUMN IF NOT EXISTS source_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+        ALTER TABLE battle_state
+        ADD COLUMN IF NOT EXISTS once_flags JSONB NOT NULL DEFAULT '{}'::jsonb;
 
         ALTER TABLE character_buffs
         ADD COLUMN IF NOT EXISTS source_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL;
@@ -207,8 +221,36 @@ async function ensureSchema() {
         CREATE INDEX IF NOT EXISTS idx_battle_events_id ON battle_events(id DESC);
         CREATE INDEX IF NOT EXISTS idx_status_resistances_character ON status_resistances(character_id);
         CREATE INDEX IF NOT EXISTS idx_battle_events_round_turn ON battle_events(round_number, turn_pass, id);
+        ALTER TABLE battle_state
+        ADD COLUMN IF NOT EXISTS flow_stack JSONB NOT NULL DEFAULT '{"frames":[],"frameSeq":1}'::jsonb;
+
         CREATE INDEX IF NOT EXISTS idx_reaction_windows_status ON reaction_windows(status, id DESC);
         CREATE INDEX IF NOT EXISTS idx_reaction_windows_round_turn ON reaction_windows(round_number, turn_pass, id DESC);
+
+        ALTER TABLE reaction_windows
+        ADD COLUMN IF NOT EXISTS reactor_id INTEGER REFERENCES characters(id) ON DELETE SET NULL;
+
+        ALTER TABLE reaction_windows
+        ADD COLUMN IF NOT EXISTS batch_id TEXT;
+
+        CREATE INDEX IF NOT EXISTS idx_reaction_windows_batch
+            ON reaction_windows(batch_id, id);
+
+        CREATE INDEX IF NOT EXISTS idx_reaction_windows_reactor
+            ON reaction_windows(reactor_id, status);
+
+        ALTER TABLE characters
+        ADD COLUMN IF NOT EXISTS reaction_default_skip BOOLEAN NOT NULL DEFAULT FALSE;
+
+        ALTER TABLE reaction_windows
+        DROP CONSTRAINT IF EXISTS reaction_windows_status_check;
+
+        ALTER TABLE reaction_windows
+        ADD CONSTRAINT reaction_windows_status_check
+        CHECK (status IN (
+            'open', 'ready', 'resolving', 'resolved',
+            'skipped', 'expired', 'queued'
+        ));
     `);
 }
 

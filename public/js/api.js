@@ -49,13 +49,25 @@ export const api = {
         body: JSON.stringify(payload)
     }),
 
-    getOpenReaction: () => request('/api/combat/reactions/open'),
+    getOpenReaction: (actorId = null) =>
+        request(
+            actorId
+                ? `/api/combat/reactions/open?actorId=${encodeURIComponent(actorId)}`
+                : '/api/combat/reactions/open'
+        ),
 
     respondReaction: (reactionId, payload) =>
         request(`/api/combat/reactions/${reactionId}/respond`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
+        }),
+
+    setReactionDefaultSkip: (characterId, enabled) =>
+        request(`/api/characters/${characterId}/reaction-default-skip`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: Boolean(enabled) })
         }),
 
     nextTurn: () => request('/api/combat/next-turn', {
@@ -93,11 +105,15 @@ export const api = {
         body: JSON.stringify({ statType, delta })
     }),
 
-    addBuff: (characterId, buffKey, sourceCharacterId = null) =>
+    addBuff: (characterId, buffKey, sourceCharacterId = null, extra = {}) =>
         request(`/api/characters/${characterId}/buffs`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ buffKey, sourceCharacterId })
+            body: JSON.stringify({
+                buffKey,
+                sourceCharacterId,
+                ...extra
+            })
         }),
 
     removeBuff: (characterId, buffKey) => request(`/api/characters/${characterId}/buffs/${encodeURIComponent(buffKey)}`, {

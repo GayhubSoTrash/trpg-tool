@@ -4,519 +4,116 @@ const { Server } = require('socket.io');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const pool = require('./db');
 const { ensureSchema } = require('./schema');
 const SKILL_DATA = require('./skill-data');
+const combat = require('./lib/combat');
 
 const app = express();
 const httpServer = http.createServer(app);
 const io = new Server(httpServer);
 const PORT = Number(process.env.PORT) || 3000;
-const HOST = process.env.HOST || '127.0.0.1';
+const HOST = process.env.HOST || '0.0.0.0';
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 
-const BUFF_CATALOG = {
-    // 正向增益
-    attack_order: {
-        key: 'attack_order',
-        name: '進攻指令',
-        effect: '本輪內物理攻擊、魔法攻擊 +25%',
-        icon: 'command_attack',
-        kind: 'buff',
-        manual: true,
-        modifiers: { patkMult: 1.25, matkMult: 1.25 }
-    },
-    war_cry: {
-        key: 'war_cry',
-        name: '戰吼',
-        effect: '本輪內造成傷害 +25%',
-        icon: 'warcry',
-        kind: 'buff',
-        manual: true,
-        modifiers: { damageMult: 1.25 }
-    },
-    defense_stance: {
-        key: 'defense_stance',
-        name: '防禦姿態',
-        effect: '本輪內防禦 +25%',
-        icon: 'shield',
-        kind: 'buff',
-        manual: true,
-        modifiers: { defenseMult: 1.25 }
-    },
-    acceleration: {
-        key: 'acceleration',
-        name: '加速',
-        effect: '本輪內命中 +20、迴避 +20、行動速度 +10（可疊加）',
-        icon: 'acceleration',
-        kind: 'buff',
-        stackable: true,
-        manual: false,
-        modifiers: { hitFlat: 20, dodgeFlat: 20, speedFlat: 10 }
-    },
-    attack_stance: {
-        key: 'attack_stance',
-        name: '進攻架勢',
-        effect: '本輪內物理攻擊 +25%',
-        icon: 'stance_attack',
-        kind: 'buff',
-        manual: false,
-        modifiers: { patkMult: 1.25 }
-    },
-    war_horn: {
-        key: 'war_horn',
-        name: '戰爭號角',
-        effect: '本輪內攻擊附加【無法格擋】',
-        icon: 'war_horn',
-        kind: 'buff',
-        manual: false,
-        modifiers: { unblockable: true }
-    },
-    steadfast: {
-        key: 'steadfast',
-        name: '堅守',
-        effect: '本輪內防禦 +25%、格擋率 +25%（可疊加）',
-        icon: 'steadfast',
-        kind: 'buff',
-        stackable: true,
-        manual: false,
-        modifiers: { defenseMult: 1.25, blockFlat: 25 }
-    },
-    rage: {
-        key: 'rage',
-        name: '震怒',
-        effect: '本輪內造成傷害 +25%、命中 +25（可疊加）',
-        icon: 'rage',
-        kind: 'buff',
-        stackable: true,
-        manual: false,
-        modifiers: { damageMult: 1.25, hitFlat: 25 }
-    },
-    defensive_stance: {
-        key: 'defensive_stance',
-        name: '防守姿態',
-        effect: '本輪內防禦 +25%',
-        icon: 'shield',
-        kind: 'buff',
-        manual: false,
-        modifiers: { defenseMult: 1.25 }
-    },
-    steel_curtain: {
-        key: 'steel_curtain',
-        name: '鋼鐵帷幕',
-        effect: '本輪內格擋率 +50%',
-        icon: 'steel_curtain',
-        kind: 'buff',
-        manual: false,
-        modifiers: { blockFlat: 50 }
-    },
-    battleline_defense: {
-        key: 'battleline_defense',
-        name: '戰線保衛',
-        effect: '本輪內防禦 +50%',
-        icon: 'line_defense',
-        kind: 'buff',
-        manual: false,
-        modifiers: { defenseMult: 1.5 }
-    },
-    life_shield: {
-        key: 'life_shield',
-        name: '護盾',
-        effect: '受到傷害時優先扣除護盾；護盾消耗完前不視為受到傷害',
-        icon: 'life_shield',
-        kind: 'buff',
-        manual: false,
-        modifiers: {}
-    },
-    sharpness: {
-        key: 'sharpness',
-        name: '鋒銳',
-        effect: '下一次攻擊命中時施加【流血】',
-        icon: 'sharpness',
-        kind: 'buff',
-        manual: false,
-        modifiers: { applyBleedOnHit: true }
-    },
-    mirage: {
-        key: 'mirage',
-        name: '幻影',
-        effect: '下一次被攻擊命中時，迴避一段攻擊',
-        icon: 'mirage',
-        kind: 'buff',
-        manual: false,
-        modifiers: {}
-    },
-    defense_order: {
-        key: 'defense_order',
-        name: '防護指令',
-        effect: '本輪內防禦、魔抗 +50%',
-        icon: 'command_defense',
-        kind: 'buff',
-        manual: false,
-        modifiers: { defenseMult: 1.5, resistMult: 1.5 }
-    },
-    sniper_order: {
-        key: 'sniper_order',
-        name: '狙擊指令',
-        effect: '本輪內命中 +30',
-        icon: 'crosshair',
-        kind: 'buff',
-        manual: false,
-        modifiers: { hitFlat: 30 }
-    },
-    swift_order: {
-        key: 'swift_order',
-        name: '飛速指令',
-        effect: '本輪內行動速度 +10',
-        icon: 'wing',
-        kind: 'buff',
-        manual: false,
-        modifiers: { speedFlat: 10 }
-    },
-    regeneration: {
-        key: 'regeneration',
-        name: '再生',
-        effect: '每次發動主動戰技時，恢復施加者【0.75魔法】點 HP',
-        icon: 'regen',
-        kind: 'buff',
-        manual: false,
-        modifiers: {}
-    },
-    marching_order: {
-        key: 'marching_order',
-        name: '疾行',
-        effect: '下一次進行「基礎移動」時消耗 -1',
-        icon: 'boot',
-        kind: 'buff',
-        manual: false,
-        modifiers: {}
-    },
-    auto_guard: {
-        key: 'auto_guard',
-        name: '自動格擋',
-        effect: '受到物理攻擊時自動依格擋率進行格擋；魔法傷害不能格擋',
-        icon: 'auto_guard',
-        kind: 'buff',
-        manual: false,
-        modifiers: { autoGuard: true }
-    },
-    sanctuary: {
-        key: 'sanctuary',
-        name: '庇護',
-        effect: '下一次受到的減益無效',
-        icon: 'sanctuary',
-        kind: 'buff',
-        manual: false,
-        modifiers: {}
-    },
-    quick_cast: {
-        key: 'quick_cast',
-        name: '快速詠唱',
-        effect: '本輪內僅限一次，行動順序視為第一',
-        icon: 'quick_cast',
-        kind: 'buff',
-        manual: false,
-        modifiers: { initiativeFirst: true }
-    },
-    light_link_source: {
-        key: 'light_link_source',
-        name: '熠光連結・供給',
-        effect: '本輪內魔法攻擊 -50%',
-        icon: 'link_source',
-        kind: 'debuff',
-        manual: false,
-        modifiers: { matkMult: 0.5 }
-    },
-    light_link_target: {
-        key: 'light_link_target',
-        name: '熠光連結・受能',
-        effect: '獲得施術者因熠光連結失去的魔法攻擊',
-        icon: 'link_target',
-        kind: 'buff',
-        manual: false,
-        modifiers: { useValueAsMatkFlat: true }
-    },
-    wind_walk: {
-        key: 'wind_walk',
-        name: '隨風而行',
-        effect: '本輪內行動速度 +10',
-        icon: 'wind',
-        kind: 'buff',
-        manual: false,
-        modifiers: { speedFlat: 10 }
-    },
-    empower: {
-        key: 'empower',
-        name: '賦能',
-        effect: '下一次物理近戰攻擊每段附帶【0.5魔法】傷害',
-        icon: 'empower',
-        kind: 'buff',
-        manual: false,
-        modifiers: { empowerMagic: 0.5 }
-    },
-    barrier: {
-        key: 'barrier',
-        name: '障壁',
-        effect: '下一次受到的傷害 -25%',
-        icon: 'barrier',
-        kind: 'buff',
-        manual: false,
-        modifiers: { damageTakenMult: 0.75, consumeOnDamage: true }
-    },
-    guard_ready: {
-        key: 'guard_ready',
-        name: '基礎格擋',
-        effect: '下一次受到物理攻擊時依格擋率減傷；被格擋的物理攻擊不會暴擊',
-        icon: 'guard_ready',
-        kind: 'buff',
-        manual: false,
-        modifiers: { guardReady: true }
-    },
-    break_formation: {
-        key: 'break_formation',
-        name: '破陣',
-        effect: '下一次攻擊無法被格擋；命中時施加【格擋封印】',
-        icon: 'break_formation',
-        kind: 'buff',
-        manual: false,
-        modifiers: { unblockable: true, applyBlockSealOnHit: true, consumeOnAttack: true }
-    },
+const {
+    STATUS_CATALOG,
+    LEGACY_STATUS_EXPAND,
+    expandStatusKeys,
+    expandStatusGrants,
+    statusesForSkill,
+    listManualStatuses,
+    isAbnormalStatus,
+    isDebuffStatus,
+    getStatusDefinition,
+    normalizeGrant,
+    mod
+} = require('./lib/combat/status-catalog');
 
-    // 使用者補充的特殊 / 異常狀態
-    stun: {
-        key: 'stun',
-        name: '暈厥',
-        effect: '【抗性】下一個回合跳過',
-        icon: 'stun',
-        kind: 'debuff',
-        resistance: true,
-        manual: false,
-        modifiers: {}
-    },
-    feign_death: {
-        key: 'feign_death',
-        name: '假死',
-        effect: '被擊倒時，於下一回合開始時恢復到 1 HP',
-        icon: 'feign_death',
-        kind: 'special',
-        manual: false,
-        modifiers: {}
-    },
-    bleeding: {
-        key: 'bleeding',
-        name: '流血',
-        effect: '每次被攻擊命中時，額外損失施加者【0.5魔法】點 HP',
-        icon: 'bleeding',
-        kind: 'debuff',
-        manual: false,
-        modifiers: {}
-    },
-    darkness: {
-        key: 'darkness',
-        name: '黑暗',
-        effect: '【抗性】下一段攻擊無法命中',
-        icon: 'darkness',
-        kind: 'debuff',
-        resistance: true,
-        manual: false,
-        modifiers: {}
-    },
-    poison: {
-        key: 'poison',
-        name: '中毒',
-        effect: '每次進行主要行動時，損失施加者【0.5魔法】點 HP',
-        icon: 'poison',
-        kind: 'debuff',
-        manual: false,
-        modifiers: {}
-    },
-    block_seal: {
-        key: 'block_seal',
-        name: '格擋封印',
-        effect: '無法進行格擋',
-        icon: 'block_seal',
-        kind: 'debuff',
-        manual: false,
-        modifiers: { blockDisabled: true }
-    },
-    burning: {
-        key: 'burning',
-        name: '燃燒',
-        effect: '每次進行輔助行動時，損失施加者【0.5魔法】點 HP',
-        icon: 'burning',
-        kind: 'debuff',
-        manual: false,
-        modifiers: {}
-    },
-    frozen: {
-        key: 'frozen',
-        name: '冰凍',
-        effect: '【抗性】無法迴避、無法發動輔助戰技，直到下一個回合或受到傷害',
-        icon: 'frozen',
-        kind: 'debuff',
-        resistance: true,
-        manual: false,
-        modifiers: {}
-    },
-    taunt: {
-        key: 'taunt',
-        name: '嘲諷',
-        effect: '下一次主要行動必須盡可能攻擊施加者',
-        icon: 'taunt',
-        kind: 'debuff',
-        manual: false,
-        modifiers: {}
-    },
-    berserk: {
-        key: 'berserk',
-        name: '狂暴',
-        effect: '【抗性】受到的下一次致死傷害改為 0 點',
-        icon: 'berserk',
-        kind: 'special',
-        resistance: true,
-        manual: false,
-        modifiers: {}
-    },
-    duel: {
-        key: 'duel',
-        name: '死鬥',
-        effect: '【抗性】HP 不會低於 1 點',
-        icon: 'duel',
-        kind: 'special',
-        resistance: true,
-        manual: false,
-        modifiers: {}
-    },
-
-    // 明確的數值增減益，也要顯示為 Buff / Debuff 圖標
-    defense_down_25: {
-        key: 'defense_down_25',
-        name: '防禦降低',
-        effect: '本輪內防禦 -25%',
-        icon: 'defense_down',
-        kind: 'debuff',
-        manual: false,
-        modifiers: { defenseMult: 0.75 }
-    },
-    dodge_down_20: {
-        key: 'dodge_down_20',
-        name: '迴避降低',
-        effect: '本輪內迴避 -20',
-        icon: 'dodge_down',
-        kind: 'debuff',
-        manual: false,
-        modifiers: { dodgeFlat: -20 }
-    },
-    dodge_up_20: {
-        key: 'dodge_up_20',
-        name: '迴避提升',
-        effect: '本輪內迴避 +20',
-        icon: 'dodge_up',
-        kind: 'buff',
-        manual: false,
-        modifiers: { dodgeFlat: 20 }
-    },
-    dodge_up_30: {
-        key: 'dodge_up_30',
-        name: '迴避提升',
-        effect: '本輪內迴避 +30',
-        icon: 'dodge_up',
-        kind: 'buff',
-        manual: false,
-        modifiers: { dodgeFlat: 30 }
-    },
-    dodge_down_50: {
-        key: 'dodge_down_50',
-        name: '迴避降低',
-        effect: '本輪內迴避 -50',
-        icon: 'dodge_down',
-        kind: 'debuff',
-        manual: false,
-        modifiers: { dodgeFlat: -50 }
-    },
-    dodge_down_50pct: {
-        key: 'dodge_down_50pct',
-        name: '迴避降低',
-        effect: '本輪內迴避 -50%',
-        icon: 'dodge_down',
-        kind: 'debuff',
-        manual: false,
-        modifiers: { dodgeMult: 0.5 }
-    },
-    speed_down_10: {
-        key: 'speed_down_10',
-        name: '行動速度降低',
-        effect: '本輪內行動速度 -10',
-        icon: 'speed_down',
-        kind: 'debuff',
-        manual: false,
-        modifiers: { speedFlat: -10 }
-    },
-    patk_down_25: {
-        key: 'patk_down_25',
-        name: '物理攻擊降低',
-        effect: '本輪內物理攻擊 -25%',
-        icon: 'attack_down',
-        kind: 'debuff',
-        manual: false,
-        modifiers: { patkMult: 0.75 }
-    },
-    matk_down_25: {
-        key: 'matk_down_25',
-        name: '魔法攻擊降低',
-        effect: '本輪內魔法攻擊 -25%',
-        icon: 'attack_down',
-        kind: 'debuff',
-        manual: false,
-        modifiers: { matkMult: 0.75 }
-    },
-    attack_down_25: {
-        key: 'attack_down_25',
-        name: '攻擊降低',
-        effect: '本輪內物理攻擊、魔法攻擊 -25%',
-        icon: 'attack_down',
-        kind: 'debuff',
-        manual: false,
-        modifiers: { patkMult: 0.75, matkMult: 0.75 }
-    },
-    damage_taken_up_25: {
-        key: 'damage_taken_up_25',
-        name: '易傷',
-        effect: '下一次受到的傷害 +25%',
-        icon: 'vulnerable',
-        kind: 'debuff',
-        manual: false,
-        modifiers: { damageTakenMult: 1.25, consumeOnDamage: true }
+/** Runtime buff lookup ??atomic statuses + parametric / legacy mods. */
+function lookupBuff(key, valueNum = null) {
+    if (!key) return null;
+    if (STATUS_CATALOG[key]) return STATUS_CATALOG[key];
+    const resolved = getStatusDefinition(key, valueNum);
+    if (resolved) return resolved;
+    const expand = LEGACY_STATUS_EXPAND[key];
+    if (Array.isArray(expand) && expand.length) {
+        const parts = expand
+            .map(item => {
+                if (typeof item === 'string') return STATUS_CATALOG[item] || getStatusDefinition(item);
+                if (item && item.type === 'mod') {
+                    return getStatusDefinition(
+                        combat.modKey(item.stat, item.mode),
+                        item.value
+                    );
+                }
+                return null;
+            })
+            .filter(Boolean);
+        if (!parts.length) return null;
+        return {
+            key,
+            name: parts.map(item => item.name).join('、'),
+            effect: parts.map(item => item.effect || item.name).join('、'),
+            icon: parts[0].icon,
+            kind: parts[0].kind,
+            subtype: parts[0].subtype || null,
+            stackable: false,
+            manual: false,
+            legacyExpand: expand,
+            modifiers: {}
+        };
     }
-};
+    return null;
+}
+
+const BUFF_CATALOG = new Proxy(
+    { ...STATUS_CATALOG },
+    {
+        get(target, prop) {
+            if (typeof prop !== 'string') return target[prop];
+            if (prop in target) return target[prop];
+            return lookupBuff(prop);
+        },
+        has(target, prop) {
+            return prop in target || Boolean(lookupBuff(prop));
+        }
+    }
+);
 
 const SKILL_CATALOG = {
     basic_attack: {
         key: 'basic_attack', name: '基礎攻擊', source: '初始戰技', category: 'initial', level: 1,
         timing: '主動', cost: '1AP', weapon: '所有', effect: '【1.0物理】指定一名敵方進行近戰攻擊',
-        actionCode: 'ATTACK', targetCode: 'ENEMY', logicCode: 'BASIC_ATTACK', manual: true, needsRoll: true
+        actionCode: 'ATTACK', targetCode: 'ENEMY', manual: true, needsRoll: true, skillKind: 'active'
     },
     rescue: {
         key: 'rescue', name: '救援', source: '初始戰技', category: 'initial', level: 1,
         timing: '主動', cost: '1AP', weapon: '所有', effect: '【蓄力1】指定一名被擊倒的友方，使其恢復到1點HP',
-        actionCode: 'HEAL', targetCode: 'ALLY_DOWN', logicCode: 'RESCUE', manual: true, needsRoll: false
+        actionCode: 'HEAL', targetCode: 'ALLY_DOWN', manual: true, needsRoll: false, skillKind: 'active', charge: true
     },
     basic_guard: {
         key: 'basic_guard', name: '基礎格擋', source: '初始戰技', category: 'initial', level: 1,
         timing: '自身被攻擊指定時', cost: '1SP', weapon: '所有', effect: '對本次攻擊進行格擋',
-        actionCode: 'GUARD', targetCode: 'SELF', logicCode: 'BASIC_GUARD', manual: true, needsRoll: false
+        actionCode: 'GUARD', targetCode: 'SELF', manual: true, needsRoll: false, skillKind: 'auxiliary',
+        utilityMode: 'basic_guard', statusGrants: ['guard_ready']
     },
     basic_move: {
         key: 'basic_move', name: '基礎移動', source: '初始戰技', category: 'initial', level: 1,
         timing: '主動/自身進行主要行動前', cost: '1AP/1SP', weapon: '所有', effect: '移動至任意一個未被佔據的格子',
-        actionCode: 'MOVE', targetCode: 'SELF', logicCode: 'MOVE_DECLARE', manual: true, needsRoll: false
+        actionCode: 'MOVE', targetCode: 'SELF', manual: true, needsRoll: false, skillKind: 'active'
     },
     wait: {
         key: 'wait', name: '待機', source: '基本動作', category: 'basic', level: 1,
         timing: '主動', cost: '無', weapon: '所有', effect: '放棄本次主要動作並待機',
-        actionCode: 'UTILITY', targetCode: 'SELF', logicCode: 'WAIT', manual: true, needsRoll: false
+        actionCode: 'UTILITY', targetCode: 'SELF', manual: true, needsRoll: false, skillKind: 'active',
+        pipeline: [{ module: 'wait', params: {} }, { module: 'finalize', params: {} }]
     }
 };
+
+combat.enrichSkillCatalog(SKILL_DATA);
+Object.values(SKILL_CATALOG).forEach(skill => combat.enrichSkill(skill));
 
 const ALL_EQUIPPABLE_SKILLS = new Map();
 for (const profession of SKILL_DATA.professions) {
@@ -527,6 +124,7 @@ for (const profession of SKILL_DATA.professions) {
 for (const skill of SKILL_DATA.common) {
     ALL_EQUIPPABLE_SKILLS.set(skill.key, skill);
 }
+combat.enrichSkillMap(ALL_EQUIPPABLE_SKILLS);
 
 function safeProfession(value) {
     return SKILL_DATA.professions.includes(value) ? value : '';
@@ -600,7 +198,8 @@ function buffModifiers(source) {
         resist: 0,
         damage: 0,
         damageTaken: 0,
-        dodge: 0
+        dodge: 0,
+        maxHp: 0
     };
 
     const mods = {
@@ -610,13 +209,20 @@ function buffModifiers(source) {
         resistMult: 1,
         damageMult: 1,
         damageTakenMult: 1,
+        dodgeMult: 1,
+        maxHpMult: 1,
 
+        patkFlat: 0,
+        matkFlat: 0,
+        defenseFlat: 0,
+        resistFlat: 0,
         hitFlat: 0,
         dodgeFlat: 0,
         critFlat: 0,
+        critDamageFlat: 0,
         speedFlat: 0,
         blockFlat: 0,
-        matkFlat: 0,
+        maxHpFlat: 0,
 
         autoGuard: false,
         guardReady: false,
@@ -626,53 +232,96 @@ function buffModifiers(source) {
         empowerMagic: 0,
         applyBleedOnHit: false,
         applyBlockSealOnHit: false,
+        lifeSacrifice: false,
+        lifeSacrificePatk: 0,
         consumeOnAttackKeys: [],
         consumeOnDamageKeys: []
     };
 
     for (const entry of normalizeBuffEntries(source)) {
-        const buff = BUFF_CATALOG[entry.key];
-        if (!buff) continue;
+        const key = entry.key;
+        // Parametric / legacy numeric mods
+        if (combat.accumulateModFromEntry(entry, mods, pct)) {
+            const snap = entry.sourceSnapshot || entry.source_snapshot || {};
+            if (snap.consumeOnDamage) {
+                mods.consumeOnDamageKeys.push(entry.key || entry.buff_key);
+            }
+            continue;
+        }
 
+        const expandedKeys = expandStatusKeys(key);
+        const keys = expandedKeys.length ? expandedKeys : [key];
         const count = Math.max(1, Number(entry.stackCount || 1));
-        const m = buff.modifiers || {};
 
-        // 同類百分比 Buff 以「+25% +25% = +50%」累加，
-        // 對應規則中的「1 + 所有增減量」，避免可疊加 Buff 被複利放大。
-        if (m.patkMult) pct.patk += (Number(m.patkMult) - 1) * count;
-        if (m.matkMult) pct.matk += (Number(m.matkMult) - 1) * count;
-        if (m.defenseMult) pct.defense += (Number(m.defenseMult) - 1) * count;
-        if (m.resistMult) pct.resist += (Number(m.resistMult) - 1) * count;
-        if (m.damageMult) pct.damage += (Number(m.damageMult) - 1) * count;
-        if (m.damageTakenMult) pct.damageTaken += (Number(m.damageTakenMult) - 1) * count;
-        if (m.dodgeMult) pct.dodge += (Number(m.dodgeMult) - 1) * count;
+        for (const statusKey of keys) {
+            if (combat.isModKey(statusKey) || combat.isLegacyStatKey(statusKey)) {
+                combat.accumulateModFromEntry(
+                    { ...entry, key: statusKey },
+                    mods,
+                    pct
+                );
+                continue;
+            }
 
-        mods.hitFlat += Number(m.hitFlat || 0) * count;
-        mods.dodgeFlat += Number(m.dodgeFlat || 0) * count;
-        mods.critFlat += Number(m.critFlat || 0) * count;
-        mods.speedFlat += Number(m.speedFlat || 0) * count;
-        mods.blockFlat += Number(m.blockFlat || 0) * count;
+            const buff = lookupBuff(statusKey, entry.valueNum);
+            if (!buff) continue;
+            const m = buff.modifiers || {};
 
-        if (m.useValueAsMatkFlat && entry.valueNum !== null) {
-            mods.matkFlat += Number(entry.valueNum);
+            if (m.patkPct) pct.patk += Number(m.patkPct) * count;
+            if (m.matkPct) pct.matk += Number(m.matkPct) * count;
+            if (m.defensePct) pct.defense += Number(m.defensePct) * count;
+            if (m.resistPct) pct.resist += Number(m.resistPct) * count;
+            if (m.damagePct) pct.damage += Number(m.damagePct) * count;
+            if (m.damageTakenPct) pct.damageTaken += Number(m.damageTakenPct) * count;
+            if (m.dodgePct) pct.dodge += Number(m.dodgePct) * count;
+            if (m.maxHpPct) pct.maxHp += Number(m.maxHpPct) * count;
+
+            if (m.patkMult) pct.patk += (Number(m.patkMult) - 1) * count;
+            if (m.matkMult) pct.matk += (Number(m.matkMult) - 1) * count;
+            if (m.defenseMult) pct.defense += (Number(m.defenseMult) - 1) * count;
+            if (m.resistMult) pct.resist += (Number(m.resistMult) - 1) * count;
+            if (m.damageMult) pct.damage += (Number(m.damageMult) - 1) * count;
+            if (m.damageTakenMult) pct.damageTaken += (Number(m.damageTakenMult) - 1) * count;
+            if (m.dodgeMult) pct.dodge += (Number(m.dodgeMult) - 1) * count;
+
+            mods.patkFlat += Number(m.patkFlat || 0) * count;
+            mods.matkFlat += Number(m.matkFlat || 0) * count;
+            mods.defenseFlat += Number(m.defenseFlat || 0) * count;
+            mods.resistFlat += Number(m.resistFlat || 0) * count;
+            mods.hitFlat += Number(m.hitFlat || 0) * count;
+            mods.dodgeFlat += Number(m.dodgeFlat || 0) * count;
+            mods.critFlat += Number(m.critFlat || 0) * count;
+            mods.critDamageFlat += Number(m.critDamageFlat || 0) * count;
+            mods.speedFlat += Number(m.speedFlat || 0) * count;
+            mods.blockFlat += Number(m.blockFlat || 0) * count;
+
+            if (statusKey === 'life_sacrifice') {
+                mods.lifeSacrifice = true;
+                mods.lifeSacrificePatk += Number(entry.valueNum || 0);
+            }
+            mods.maxHpFlat += Number(m.maxHpFlat || 0) * count;
+
+            if (m.useValueAsMatkFlat && entry.valueNum !== null) {
+                mods.matkFlat += Number(entry.valueNum);
+            }
+
+            if (m.autoGuard) mods.autoGuard = true;
+            if (m.guardReady) mods.guardReady = true;
+            if (m.blockDisabled) mods.blockDisabled = true;
+            if (m.unblockable) mods.unblockable = true;
+            if (m.initiativeFirst) mods.initiativeFirst = true;
+            if (m.empowerMagic) {
+                mods.empowerMagic = Math.max(
+                    mods.empowerMagic,
+                    Number(m.empowerMagic)
+                );
+            }
+            if (m.applyBleedOnHit) mods.applyBleedOnHit = true;
+            if (m.applyBlockSealOnHit) mods.applyBlockSealOnHit = true;
+
+            if (m.consumeOnAttack) mods.consumeOnAttackKeys.push(statusKey);
+            if (m.consumeOnDamage) mods.consumeOnDamageKeys.push(statusKey);
         }
-
-        if (m.autoGuard) mods.autoGuard = true;
-        if (m.guardReady) mods.guardReady = true;
-        if (m.blockDisabled) mods.blockDisabled = true;
-        if (m.unblockable) mods.unblockable = true;
-        if (m.initiativeFirst) mods.initiativeFirst = true;
-        if (m.empowerMagic) {
-            mods.empowerMagic = Math.max(
-                mods.empowerMagic,
-                Number(m.empowerMagic)
-            );
-        }
-        if (m.applyBleedOnHit) mods.applyBleedOnHit = true;
-        if (m.applyBlockSealOnHit) mods.applyBlockSealOnHit = true;
-
-        if (m.consumeOnAttack) mods.consumeOnAttackKeys.push(entry.key);
-        if (m.consumeOnDamage) mods.consumeOnDamageKeys.push(entry.key);
     }
 
     mods.patkMult = Math.max(0, 1 + pct.patk);
@@ -682,27 +331,72 @@ function buffModifiers(source) {
     mods.damageMult = Math.max(0, 1 + pct.damage);
     mods.damageTakenMult = Math.max(0, 1 + pct.damageTaken);
     mods.dodgeMult = Math.max(0, 1 + pct.dodge);
+    mods.maxHpMult = Math.max(0, 1 + pct.maxHp);
+    mods.pct = pct;
+
+    if (mods.lifeSacrifice) {
+        mods.defenseMult = 0;
+        mods.patkFlat += mods.lifeSacrificePatk;
+    }
 
     return mods;
 }
 
-function buffKeysFromMappedBuffs(buffs) {
-    return new Set((buffs || []).map(buff => buff.key));
+function effectiveStatValue(base, mult, flat = 0) {
+    return Math.floor(Number(base) * Number(mult) + Number(flat || 0));
 }
 
 function effectiveStatsFromBuffs(row, buffs) {
     const mods = buffModifiers(buffs);
-    return {
-        patk: Math.floor(Number(row.patk) * mods.patkMult),
-        matk: Math.floor(Number(row.matk) * mods.matkMult + mods.matkFlat),
-        defense: Math.floor(Number(row.defense) * mods.defenseMult),
-        resist: Math.floor(Number(row.resist) * mods.resistMult),
-        hitRate: Math.floor(Number(row.hit_rate) + mods.hitFlat),
-        dodge: Math.floor(Number(row.dodge) * mods.dodgeMult + mods.dodgeFlat),
-        crit: Math.floor(Number(row.crit) + mods.critFlat),
+    const base = {
+        patk: Number(row.patk),
+        matk: Number(row.matk),
+        defense: Number(row.defense),
+        resist: Number(row.resist),
+        hitRate: Number(row.hit_rate),
+        dodge: Number(row.dodge),
+        crit: Number(row.crit),
         critDamageBonus: Number(row.crit_damage_bonus || 0),
-        speed: Math.floor(Number(row.speed) + mods.speedFlat),
-        blockRate: clamp(Number(row.block_rate || 0) + mods.blockFlat, 0, 75),
+        speed: Number(row.speed),
+        blockRate: Number(row.block_rate || 0),
+        maxHp: Number(row.max_hp)
+    };
+
+    const patk = effectiveStatValue(base.patk, mods.patkMult, mods.patkFlat);
+    const matk = effectiveStatValue(base.matk, mods.matkMult, mods.matkFlat);
+    const defense = effectiveStatValue(base.defense, mods.defenseMult, mods.defenseFlat);
+    const resist = effectiveStatValue(base.resist, mods.resistMult, mods.resistFlat);
+    const hitRate = Math.floor(base.hitRate + mods.hitFlat);
+    const dodge = effectiveStatValue(base.dodge, mods.dodgeMult, mods.dodgeFlat);
+    const crit = Math.floor(base.crit + mods.critFlat);
+    const critDamageBonus = base.critDamageBonus + mods.critDamageFlat;
+    const speed = Math.floor(base.speed + mods.speedFlat);
+    const blockRate = clamp(base.blockRate + mods.blockFlat, 0, 75);
+    const maxHp = effectiveStatValue(base.maxHp, mods.maxHpMult, mods.maxHpFlat);
+
+    return {
+        patk,
+        matk,
+        defense,
+        resist,
+        hitRate,
+        dodge,
+        crit,
+        critDamageBonus,
+        speed,
+        blockRate,
+        maxHp,
+        patkDelta: patk - base.patk,
+        matkDelta: matk - base.matk,
+        defenseDelta: defense - base.defense,
+        resistDelta: resist - base.resist,
+        hitRateDelta: hitRate - base.hitRate,
+        dodgeDelta: dodge - base.dodge,
+        critDelta: crit - base.crit,
+        critDamageBonusDelta: critDamageBonus - base.critDamageBonus,
+        speedDelta: speed - base.speed,
+        blockRateDelta: blockRate - base.blockRate,
+        maxHpDelta: maxHp - base.maxHp,
         damageMult: mods.damageMult,
         damageTakenMult: mods.damageTakenMult,
         canAutoGuard: mods.autoGuard,
@@ -716,46 +410,145 @@ async function applyBuffToCharacters(client, characterIds, buffKey, {
     sourceSkillKey = null,
     sourceCharacterId = null,
     expiresRound = null,
-    valueNum = null
+    valueNum = null,
+    sourceSnapshot = null
 } = {}) {
-    const definition = BUFF_CATALOG[buffKey];
-    if (!definition) return 0;
-
     const uniqueIds = [...new Set((characterIds || []).map(Number).filter(Boolean))];
     if (!uniqueIds.length) return 0;
 
-    await client.query(`
-        INSERT INTO character_buffs (
-            character_id, buff_key, source_skill_key,
-            source_character_id, expires_round,
-            stack_count, value_num
-        )
-        SELECT
-            unnest($1::int[]),
-            $2, $3, $4, $5,
-            1, $6
-        ON CONFLICT (character_id, buff_key)
-        DO UPDATE SET
-            source_skill_key = EXCLUDED.source_skill_key,
-            source_character_id = EXCLUDED.source_character_id,
-            expires_round = EXCLUDED.expires_round,
-            stack_count = CASE
-                WHEN $7::boolean THEN character_buffs.stack_count + 1
-                ELSE 1
-            END,
-            value_num = EXCLUDED.value_num,
-            created_at = NOW()
-    `, [
-        uniqueIds,
-        buffKey,
-        sourceSkillKey,
-        sourceCharacterId,
-        expiresRound,
-        valueNum,
-        definition.stackable === true
-    ]);
+    const grants = [...expandStatusGrants(buffKey)];
+    if (!grants.length && typeof buffKey === 'string') {
+        // Direct mod key with explicit value_num
+        if (combat.isModKey(buffKey) && valueNum != null) {
+            const parsed = combat.parseModKey(buffKey);
+            const result = await combat.applyStatMod(client, uniqueIds, {
+                ...parsed,
+                value: valueNum,
+                sourceSkillKey,
+                sourceCharacterId,
+                expiresRound
+            });
+            return result.applied;
+        }
+        if (lookupBuff(buffKey, valueNum)) {
+            grants.push(buffKey);
+        }
+    }
+    if (!grants.length) return 0;
 
-    return uniqueIds.length;
+    let applied = 0;
+    for (const grant of grants) {
+        const modSpec = combat.grantToModSpec(grant);
+        if (modSpec) {
+            const grantSnap = (grant && typeof grant === 'object' && grant.consumeOnDamage)
+                ? { ...(sourceSnapshot || {}), consumeOnDamage: true }
+                : sourceSnapshot;
+            const result = await combat.applyStatMod(client, uniqueIds, {
+                ...modSpec,
+                sourceSkillKey,
+                sourceCharacterId,
+                expiresRound,
+                sourceSnapshot: grantSnap
+            });
+            applied += result.applied;
+            continue;
+        }
+
+        if (typeof grant === 'string' && combat.isLegacyStatKey(grant)) {
+            const legacy = combat.legacyStatKeyToMod(grant);
+            const result = await combat.applyStatMod(client, uniqueIds, {
+                ...legacy,
+                sourceSkillKey,
+                sourceCharacterId,
+                expiresRound
+            });
+            applied += result.applied;
+            continue;
+        }
+
+        if (typeof grant === 'string' && combat.isModKey(grant)) {
+            if (valueNum == null) continue;
+            const parsed = combat.parseModKey(grant);
+            const result = await combat.applyStatMod(client, uniqueIds, {
+                ...parsed,
+                value: valueNum,
+                sourceSkillKey,
+                sourceCharacterId,
+                expiresRound
+            });
+            applied += result.applied;
+            continue;
+        }
+
+        const statusKey = typeof grant === 'string' ? grant : null;
+        if (!statusKey) continue;
+        const definition = lookupBuff(statusKey, valueNum);
+        if (!definition || definition.parametric) continue;
+
+        let snapshot = sourceSnapshot;
+        let rowValue = valueNum;
+        if (!snapshot && sourceCharacterId && combat.isTickStatus(statusKey)) {
+            const magic = await sourceEffectiveMagic(client, sourceCharacterId);
+            const equipped = await getEquippedSkillKeys(client, sourceCharacterId);
+            const src = await client.query(
+                'SELECT crit, crit_damage_bonus FROM characters WHERE id = $1',
+                [sourceCharacterId]
+            );
+            snapshot = {
+                tickBase: combat.tickBaseAmount(magic, statusKey),
+                crit: Number(src.rows[0]?.crit || 0),
+                critDamageBonus: Number(src.rows[0]?.crit_damage_bonus || 0),
+                hasNeedle: combat.hasNeedleCrit(equipped)
+            };
+            if (rowValue == null && combat.statusTick(statusKey).kind === 'hp_loss') {
+                rowValue = snapshot.tickBase;
+            }
+        }
+
+        await client.query(`
+            INSERT INTO character_buffs (
+                character_id, buff_key, source_skill_key,
+                source_character_id, expires_round,
+                stack_count, value_num, source_snapshot
+            )
+            SELECT
+                unnest($1::int[]),
+                $2, $3, $4, $5,
+                1, $6, $8::jsonb
+            ON CONFLICT (character_id, buff_key)
+            DO UPDATE SET
+                source_skill_key = EXCLUDED.source_skill_key,
+                source_character_id = EXCLUDED.source_character_id,
+                expires_round = EXCLUDED.expires_round,
+                stack_count = CASE
+                    WHEN $7::boolean THEN character_buffs.stack_count + 1
+                    ELSE 1
+                END,
+                value_num = EXCLUDED.value_num,
+                source_snapshot = EXCLUDED.source_snapshot,
+                created_at = NOW()
+        `, [
+            uniqueIds,
+            statusKey,
+            sourceSkillKey,
+            sourceCharacterId,
+            expiresRound,
+            rowValue,
+            definition.stackable === true,
+            JSON.stringify(snapshot || {})
+        ]);
+        applied += uniqueIds.length;
+    }
+
+    return applied;
+}
+
+async function applyStatusBundle(client, characterIds, statusKeys, options = {}) {
+    let total = 0;
+    for (const key of statusKeys || []) {
+        total += await applyBuffToCharacters(client, characterIds, key, options);
+    }
+    return total;
 }
 
 async function removeBuffKeys(client, characterId, buffKeys) {
@@ -846,10 +639,14 @@ async function getCharacterPosition(client, characterId) {
     };
 }
 
+/**
+ * Position helpers live in lib/combat/world-geometry.js
+ * (shared by 魂靈風息 / 絆腳).
+ */
 
 async function swapCharacterPositions(client, firstCharacterId, secondCharacterId) {
     if (Number(firstCharacterId) === Number(secondCharacterId)) {
-        throw new Error('必須選擇另一名角色才能交換位置');
+        throw new Error('error');
     }
 
     const result = await client.query(`
@@ -868,7 +665,7 @@ async function swapCharacterPositions(client, firstCharacterId, secondCharacterI
     );
 
     if (!firstCell || !secondCell) {
-        throw new Error('交換位置需要雙方都已經放置在戰場格內');
+        throw new Error('error');
     }
 
     await client.query(
@@ -893,19 +690,6 @@ async function swapCharacterPositions(client, firstCharacterId, secondCharacterI
         firstCellId: Number(firstCell.id),
         secondCellId: Number(secondCell.id)
     };
-}
-
-async function characterIdsAtCells(client, groupId, whereSql, params = []) {
-    const result = await client.query(`
-        SELECT ch.id
-        FROM cells c
-        JOIN characters ch ON ch.id = c.occupied_by
-        WHERE c.group_id = $1
-          ${whereSql}
-        ORDER BY c.row_index, c.col_index, ch.id
-    `, [groupId, ...params]);
-
-    return result.rows.map(row => Number(row.id));
 }
 
 async function resolveAttackTargetIds(client, actor, target, skill, requestedDirection = null) {
@@ -1008,8 +792,7 @@ async function resolveAttackTargetIds(client, actor, target, skill, requestedDir
         return ids.length ? ids : [Number(target.id)];
     }
 
-    // 魂靈風息：直接指定前 / 後 / 左 / 右。
-    // 使用「世界座標」沿直線搜尋，所以角色位於不同 grid_group 也能被正確包含。
+// 魂之風息：直線指定 / 前/後/左右；共用座標正交射線判定（可跨 grid_group）
     if (shape === 'ORTHOGONAL_LINE' && actorPos) {
         const direction = String(requestedDirection || '').toUpperCase();
         if (!['UP', 'DOWN', 'LEFT', 'RIGHT'].includes(direction)) {
@@ -1038,32 +821,15 @@ async function resolveAttackTargetIds(client, actor, target, skill, requestedDir
             if (characterId === Number(actor.id)) continue;
 
             const cellSize = Number(row.cell_size);
-            const centerX =
-                Number(row.world_x) +
-                (Number(row.col_index) + 0.5) * cellSize;
-            const centerY =
-                Number(row.world_y) +
-                (Number(row.row_index) + 0.5) * cellSize;
+            const otherPos = {
+                cellSize,
+                centerX: Number(row.world_x) + (Number(row.col_index) + 0.5) * cellSize,
+                centerY: Number(row.world_y) + (Number(row.row_index) + 0.5) * cellSize
+            };
 
-            const dx = centerX - actorPos.centerX;
-            const dy = centerY - actorPos.centerY;
-
-            // 戰場群可以稍微沒對齊；容許約三分之一格寬的偏差。
-            const tolerance = Math.max(
-                8,
-                Math.min(actorPos.cellSize, cellSize) * 0.34
-            );
-
-            const vertical = Math.abs(dx) <= tolerance;
-            const horizontal = Math.abs(dy) <= tolerance;
-
-            const match =
-                (direction === 'UP' && vertical && dy < -tolerance) ||
-                (direction === 'DOWN' && vertical && dy > tolerance) ||
-                (direction === 'LEFT' && horizontal && dx < -tolerance) ||
-                (direction === 'RIGHT' && horizontal && dx > tolerance);
-
-            if (match) ids.push(characterId);
+            if (combat.isOnOrthogonalRay(actorPos, otherPos, direction)) {
+                ids.push(characterId);
+            }
         }
 
         return [...new Set(ids)];
@@ -1073,7 +839,7 @@ async function resolveAttackTargetIds(client, actor, target, skill, requestedDir
 }
 
 function isMainActionSkill(skill) {
-    return skill.logicCode === 'WAIT' || String(skill.timing || '').includes('主動');
+    return combat.isWaitSkill(skill) || String(skill.timing || '').includes('主動');
 }
 
 function isAuxiliarySkill(skill) {
@@ -1081,10 +847,8 @@ function isAuxiliarySkill(skill) {
 }
 
 function statusExpiresRound(buffKey, currentRound) {
-    if (['stun', 'darkness', 'frozen', 'feign_death', 'berserk'].includes(buffKey)) {
-        return currentRound + 1;
-    }
-    return currentRound;
+    const def = lookupBuff(buffKey) || { duration: { type: 'round_end' } };
+    return combat.statusExpiresRound(def, currentRound);
 }
 
 async function getCharacterBuffEntries(client, characterId) {
@@ -1096,7 +860,8 @@ async function getCharacterBuffEntries(client, characterId) {
             source_skill_key,
             stack_count,
             value_num,
-            expires_round
+            expires_round,
+            source_snapshot
         FROM character_buffs
         WHERE character_id = $1
         ORDER BY id
@@ -1123,7 +888,17 @@ async function sourceEffectiveMagic(client, sourceCharacterId) {
     );
 }
 
-async function applyDirectHpLoss(client, characterId, amount) {
+async function getEquippedSkillKeys(client, characterId) {
+    const result = await client.query(
+        'SELECT skill_key FROM character_skills WHERE character_id = $1',
+        [characterId]
+    );
+    return new Set(result.rows.map(row => row.skill_key));
+}
+
+async function applyDirectHpLoss(client, characterId, amount, {
+    allowNegative = null
+} = {}) {
     const loss = Math.max(0, Math.floor(Number(amount) || 0));
     if (!loss) return { oldHp: null, newHp: null, loss: 0, duelPrevented: 0 };
 
@@ -1136,8 +911,19 @@ async function applyDirectHpLoss(client, characterId, amount) {
     const oldHp = Number(characterResult.rows[0].hp);
     const buffs = await getCharacterBuffEntries(client, characterId);
     const hasDuel = buffs.some(row => row.buff_key === 'duel');
-    const floorHp = hasDuel ? 1 : 0;
-    const newHp = Math.max(floorHp, oldHp - loss);
+    const equipped = await getEquippedSkillKeys(client, characterId);
+    const hasGritPassive = allowNegative === true
+        ? true
+        : allowNegative === false
+            ? false
+            : combat.hasGrit(equipped);
+    const floorHp = combat.hpFloorAfterDamage({
+        hasDuel,
+        hasGritPassive
+    });
+    const newHp = floorHp === Number.NEGATIVE_INFINITY
+        ? oldHp - loss
+        : Math.max(floorHp, oldHp - loss);
     const actualLoss = Math.max(0, oldHp - newHp);
 
     await client.query(
@@ -1149,9 +935,243 @@ async function applyDirectHpLoss(client, characterId, amount) {
         oldHp,
         newHp,
         loss: actualLoss,
-        duelPrevented: Math.max(0, loss - actualLoss)
+        duelPrevented: Math.max(0, loss - actualLoss),
+        gritActive: hasGritPassive && newHp <= 0
     };
 }
+
+async function getAdjacentEmptyCells(client, characterId) {
+    const pos = await getCharacterPosition(client, characterId);
+    if (!pos) return [];
+
+    const result = await client.query(`
+        SELECT id, row_index, col_index
+        FROM cells
+        WHERE group_id = $1
+          AND occupied_by IS NULL
+          AND (
+            (row_index = $2 AND ABS(col_index - $3) = 1) OR
+            (col_index = $3 AND ABS(row_index - $2) = 1)
+          )
+        ORDER BY row_index, col_index
+    `, [pos.groupId, pos.row, pos.col]);
+
+    return result.rows.map(row => ({
+        cellId: Number(row.id),
+        row: Number(row.row_index),
+        col: Number(row.col_index)
+    }));
+}
+
+async function enrichReactionOptionsWithPicks(client, options, {
+    sourceTargetId = null,
+    sourceActorId = null,
+    attackSkill = null
+} = {}) {
+    const enriched = [];
+
+    for (const option of options || []) {
+        // 絆腳等：攻擊者須在目標正上方（同座標上方，可跨 group）
+        const reactionDef = combat.getReactionDef(
+            combat.getSkillBehavior?.(option.skillKey) || { key: option.skillKey }
+        );
+        const positionFilter =
+            option.meta?.positionFilter ||
+            reactionDef?.positionFilter ||
+            reactionDef?.match?.positionFilter ||
+            null;
+        if (positionFilter === 'attacker_directly_above') {
+            const reactorPos = await getCharacterPosition(client, option.actorId);
+            const attackerId = Number(
+                option.meta?.originalActorId || sourceActorId || 0
+            );
+            const attackerPos = attackerId
+                ? await getCharacterPosition(client, attackerId)
+                : null;
+            if (!combat.isWorldDirectlyAbove(attackerPos, reactorPos)) continue;
+        }
+
+        const needsPick = combat.resolvePickKind?.(option, reactionDef) ||
+            option.needsPick ||
+            option.meta?.needsPick ||
+            reactionDef?.pick?.kind ||
+            null;
+        const next = {
+            ...option,
+            pick: needsPick ? { kind: needsPick } : option.pick || null,
+            needsPick,
+            meta: {
+                ...(option.meta || {}),
+                needsPick,
+                ...(positionFilter ? { positionFilter } : {})
+            }
+        };
+
+        if (needsPick) {
+            await combat.applyPickCatalog(needsPick, {
+                client,
+                option,
+                next,
+                sourceTargetId,
+                sourceActorId,
+                attackSkill,
+                helpers: {
+                    getAdjacentEmptyCells,
+                    resolveAttackTargetIds,
+                    ALL_EQUIPPABLE_SKILLS,
+                    BUFF_CATALOG
+                }
+            });
+        }
+
+        enriched.push(next);
+    }
+
+    return enriched;
+}
+
+async function resolveFollowUpAttack(client, {
+    actor,
+    targetId,
+    multiplier = 0.5,
+    damageType = '物理',
+    ranged = false,
+    skill = null
+}) {
+    const targetResult = await client.query(
+        'SELECT * FROM characters WHERE id = $1 FOR UPDATE',
+        [targetId]
+    );
+    const target = targetResult.rows[0];
+    if (!target || Number(target.hp) <= 0) {
+        throw new Error('追擊／後續攻擊目標無效');
+    }
+
+    const actorBuffs = await getCharacterBuffEntries(client, actor.id);
+    const targetBuffs = await getCharacterBuffEntries(client, target.id);
+    const actorMods = buffModifiers(actorBuffs);
+    const targetMods = buffModifiers(targetBuffs);
+
+    const profile = combat.createAttackProfile({
+        attacker: actor,
+        defender: target,
+        attackerMods: actorMods,
+        defenderMods: targetMods,
+        defenderStatusKeys: targetBuffs.map(row => row.buff_key)
+    });
+
+    const outcome = combat.resolveSegment(profile, { multiplier, damageType });
+
+    let loss = 0;
+    let newHp = Number(target.hp);
+    if (outcome.hit) {
+        const applied = await applyDirectHpLoss(client, target.id, outcome.damage);
+        loss = applied.loss;
+        newHp = applied.newHp;
+    }
+
+    const rangeLabel = ranged ? '遠程' : '近戰';
+    const hitLabel = outcome.critical ? '暴擊' : '命中';
+    const blockLabel = outcome.blocked ? `被格擋${outcome.blockRate}%` : '';
+
+    return {
+        reactionText:
+            `${actor.name} 發動「${skill?.name || '後續攻擊'}」→ ${target.name}` +
+            `（${rangeLabel}【${multiplier}${damageType}】）` +
+            (outcome.hit
+                ? `：${hitLabel}${blockLabel}，造成 ${loss} 傷害（HP${newHp}）`
+                : `：未命中（骰 ${outcome.roll}）`),
+        charactersChanged: loss > 0,
+        hit: outcome.hit,
+        loss
+    };
+}
+
+
+async function applyReturnReroll(client, {
+    actor,
+    window,
+    missedSegments = []
+}) {
+    const targetId = Number(
+        window.sourceTargetId ||
+        window.context?.targetId ||
+        window.resumePayload?.targetId ||
+        0
+    );
+    if (!targetId) {
+        return {
+            reactionText: `${actor.name} 發動「回返」，但找不到攻擊目標。`,
+            charactersChanged: false
+        };
+    }
+
+    const targetResult = await client.query(
+        'SELECT * FROM characters WHERE id = $1 FOR UPDATE',
+        [targetId]
+    );
+    const target = targetResult.rows[0];
+    if (!target) {
+        return {
+            reactionText: `${actor.name} 發動「回返」，但目標已不存在。`,
+            charactersChanged: false
+        };
+    }
+
+    const actorBuffs = await getCharacterBuffEntries(client, actor.id);
+    const targetBuffs = await getCharacterBuffEntries(client, target.id);
+    const actorMods = buffModifiers(actorBuffs);
+    const targetMods = buffModifiers(targetBuffs);
+
+    const profile = combat.createAttackProfile({
+        attacker: actor,
+        defender: target,
+        attackerMods: actorMods,
+        defenderMods: targetMods,
+        defenderStatusKeys: targetBuffs.map(row => row.buff_key)
+    });
+
+    const segments = missedSegments.length
+        ? missedSegments
+        : [{ segment: 1, damageType: '物理', multiplier: 1 }];
+
+    const lines = [];
+    let charactersChanged = false;
+    let totalLoss = 0;
+
+    for (const seg of segments) {
+        const packet = {
+            damageType: seg.damageType || '物理',
+            multiplier: Number(seg.multiplier || seg.packetMultiplier || 1)
+        };
+        const outcome = combat.resolveSegment(profile, packet);
+        const label = `第${seg.segment || '?'}段回返`;
+
+        if (!outcome.hit) {
+            lines.push(`${label}：骰 ${outcome.roll} 仍未命中`);
+            continue;
+        }
+
+        const applied = await applyDirectHpLoss(client, target.id, outcome.damage);
+        totalLoss += applied.loss;
+        charactersChanged = charactersChanged || applied.loss > 0;
+
+        const hitLabel = outcome.critical ? '暴擊' : '命中';
+        const blockLabel = outcome.blocked ? `被格擋${outcome.blockRate}%` : '';
+        lines.push(
+            `${label}：骰 ${outcome.roll} ${hitLabel}${blockLabel}，造成 ${applied.loss} 傷害`
+        );
+    }
+
+    return {
+        reactionText:
+            `${actor.name} 發動「回返」→ ${target.name}\n` +
+            (lines.join('\n') || '沒有可重擲的未命中段'),
+        charactersChanged,
+        flags: { returnRerollApplied: true, returnRerollLoss: totalLoss }
+    };
+}
+
 
 async function applyDebuffBundle(client, characterIds, buffKeys, {
     sourceSkillKey = null,
@@ -1159,7 +1179,9 @@ async function applyDebuffBundle(client, characterIds, buffKeys, {
     currentRound = 1
 } = {}) {
     const ids = [...new Set((characterIds || []).map(Number).filter(Boolean))];
-    const keys = [...new Set((buffKeys || []).filter(key => BUFF_CATALOG[key]))];
+    const grants = [...new Set(
+        (buffKeys || []).flatMap(key => expandStatusGrants(key))
+    )];
 
     const result = {
         applied: [],
@@ -1168,11 +1190,18 @@ async function applyDebuffBundle(client, characterIds, buffKeys, {
     };
 
     for (const characterId of ids) {
-        if (!keys.length) continue;
+        if (!grants.length) continue;
 
-        const hasDebuff = keys.some(
-            key => BUFF_CATALOG[key]?.kind === 'debuff'
-        );
+        const hasDebuff = grants.some(grant => {
+            if (typeof grant === 'object' && grant.type === 'mod') {
+                return Number(grant.value) < 0;
+            }
+            if (typeof grant === 'string') {
+                const def = lookupBuff(grant);
+                return def?.kind === 'debuff';
+            }
+            return false;
+        });
 
         if (hasDebuff) {
             const sanctuary = await client.query(`
@@ -1190,8 +1219,30 @@ async function applyDebuffBundle(client, characterIds, buffKeys, {
             }
         }
 
-        for (const key of keys) {
-            const definition = BUFF_CATALOG[key];
+        for (const grant of grants) {
+            if (typeof grant === 'object' && grant.type === 'mod') {
+                await applyBuffToCharacters(
+                    client,
+                    [characterId],
+                    grant,
+                    {
+                        sourceSkillKey,
+                        sourceCharacterId,
+                        expiresRound: currentRound
+                    }
+                );
+                result.applied.push({
+                    characterId,
+                    key: combat.modKey(grant.stat, grant.mode),
+                    value: grant.value
+                });
+                continue;
+            }
+
+            const key = typeof grant === 'string' ? grant : null;
+            if (!key) continue;
+            const definition = lookupBuff(key);
+            if (!definition) continue;
 
             if (definition.resistance) {
                 const prior = await client.query(`
@@ -1233,40 +1284,45 @@ async function applyDebuffBundle(client, characterIds, buffKeys, {
     return result;
 }
 
-function onHitDebuffKeys(skill) {
-    const byName = {
-        '護盾猛擊': ['stun'],
-        '猛擊': ['defense_down_25'],
-        '輪擺': ['defense_down_25'],
-        '戰線剋星': ['defense_down_25'],
-        '淬毒': ['poison'],
-        '暗影噬咬': ['darkness', 'speed_down_10'],
-        '封口': ['block_seal'],
-        '先制射擊': ['stun'],
-        '火球術': ['burning'],
-        '寒冰箭': ['frozen'],
-        '雷霆劍': ['stun']
-    };
-
-    const keys = [...(byName[skill?.name] || [])];
-    const effect = String(skill?.effect || '');
-
-    if (/目標防禦\s*-\s*25%/.test(effect)) keys.push('defense_down_25');
-    if (/目標物理攻擊\s*-\s*25%/.test(effect)) keys.push('patk_down_25');
-    if (/目標魔法攻擊\s*-\s*25%/.test(effect)) keys.push('matk_down_25');
-    if (/目標(?:物理和魔法攻擊|物理、魔法攻擊|攻擊力?|攻擊)\s*-\s*25%/.test(effect)) {
-        keys.push('attack_down_25');
-    }
-
-    return [...new Set(keys)];
+/** On-hit status grants from skill registry / catalog (mods + atomics). */
+function onHitStatusGrants(skill) {
+    if (!skill || skill.actionCode !== 'ATTACK') return [];
+    // Per-packet sequences are applied separately via attack_segment.onHitPerPacket.
+    if (combat.onHitPerPacket(skill)) return [];
+    // Self-buff-after-attack skills skip target on-hit grants.
+    if (combat.afterAttackSelf(skill)?.length) return [];
+    return statusesForSkill(skill).filter(grant => {
+        if (typeof grant === 'object' && grant.type === 'mod') {
+            return Number(grant.value) < 0;
+        }
+        if (typeof grant === 'string') {
+            return isDebuffStatus(grant) || isAbnormalStatus(grant);
+        }
+        return false;
+    });
 }
 
 async function enforceActionRestrictions(client, actor, skill, selectedTarget, requestedDirection = null) {
+    // 擊倒（含根性負 HP）：無法發動任何主動／輔助戰技
+    if (Number(actor.hp) <= 0) {
+        throw new Error(`${actor.name} 已擊倒，無法發動戰技`);
+    }
+
     const entries = await getCharacterBuffEntries(client, actor.id);
     const keys = new Set(entries.map(row => row.buff_key));
 
     if (keys.has('frozen') && isAuxiliarySkill(skill)) {
         throw new Error(`${actor.name} 處於【冰凍】，目前無法發動輔助戰技`);
+    }
+
+    if (keys.has('aux_seal') && isAuxiliarySkill(skill)) {
+        throw new Error(`${actor.name} 處於【凍結】，無法發動輔助戰技`);
+    }
+
+    if (keys.has('charging')) {
+        if (isAuxiliarySkill(skill)) {
+            throw new Error(`${actor.name} 正在蓄力，無法發動輔助戰技`);
+        }
     }
 
     if (!isMainActionSkill(skill)) return { consumeTaunt: false };
@@ -1306,53 +1362,64 @@ async function triggerActionStatuses(client, actor, skill, currentRound) {
     const lines = [];
     let changed = false;
 
-    const triggerLoss = async (entry, label) => {
+    const tickAmount = async (entry) => {
         const magic = await sourceEffectiveMagic(client, entry.source_character_id);
-        const amount = Math.max(1, Math.floor(magic * 0.5));
-        const result = await applyDirectHpLoss(client, actor.id, amount);
+        return combat.tickAmountFromEntry(entry, { sourceMagic: magic });
+    };
+
+    const triggerLoss = async (entry, tick) => {
+        const result = await applyDirectHpLoss(
+            client,
+            actor.id,
+            await tickAmount(entry)
+        );
         if (result.loss > 0) {
-            lines.push(`${label}：${actor.name} 額外損失 ${result.loss} HP`);
+            lines.push(`${tick.label}：${actor.name} 損失 ${result.loss} HP`);
             changed = true;
         }
     };
 
-    if (isMainActionSkill(skill)) {
-        const poison = entries.find(row => row.buff_key === 'poison');
-        if (poison) await triggerLoss(poison, '【中毒】');
-    }
+    const triggerHeal = async (entry, tick) => {
+        const heal = await tickAmount(entry);
+        const currentResult = await client.query(
+            'SELECT hp, max_hp FROM characters WHERE id = $1 FOR UPDATE',
+            [actor.id]
+        );
+        if (!currentResult.rows.length) return;
 
-    if (isAuxiliarySkill(skill)) {
-        const burning = entries.find(row => row.buff_key === 'burning');
-        if (burning) await triggerLoss(burning, '【燃燒】');
-    }
+        const oldHp = Number(currentResult.rows[0].hp);
+        const maxHp = Number(currentResult.rows[0].max_hp);
+        const newHp = Math.min(maxHp, oldHp + heal);
+        const actualHeal = Math.max(0, newHp - oldHp);
 
-    if (String(skill.timing || '').includes('主動')) {
-        const regen = entries.find(row => row.buff_key === 'regeneration');
-
-        if (regen?.source_character_id) {
-            const magic = await sourceEffectiveMagic(client, regen.source_character_id);
-            const heal = Math.max(1, Math.floor(magic * 0.75));
-
-            const currentResult = await client.query(
-                'SELECT hp, max_hp FROM characters WHERE id = $1 FOR UPDATE',
-                [actor.id]
+        if (actualHeal > 0) {
+            await client.query(
+                'UPDATE characters SET hp = $1 WHERE id = $2',
+                [newHp, actor.id]
             );
+            lines.push(`${tick.label}：${actor.name} 恢復 ${actualHeal} HP`);
+            changed = true;
+        }
+    };
 
-            if (currentResult.rows.length) {
-                const oldHp = Number(currentResult.rows[0].hp);
-                const maxHp = Number(currentResult.rows[0].max_hp);
-                const newHp = Math.min(maxHp, oldHp + heal);
-                const actualHeal = Math.max(0, newHp - oldHp);
+    // Which ticks this action triggers, by the shape of the skill rather than by
+    // the ActionContext flags the timing bus uses.
+    const triggeredKeys = [
+        isMainActionSkill(skill) ? 'poison' : null,
+        isAuxiliarySkill(skill) ? 'burning' : null,
+        String(skill.timing || '').includes('主動') ? 'regeneration' : null
+    ].filter(Boolean);
 
-                if (actualHeal > 0) {
-                    await client.query(
-                        'UPDATE characters SET hp = $1 WHERE id = $2',
-                        [newHp, actor.id]
-                    );
-                    lines.push(`【再生】：${actor.name} 恢復 ${actualHeal} HP`);
-                    changed = true;
-                }
-            }
+    for (const statusKey of triggeredKeys) {
+        const tick = combat.statusTick(statusKey);
+        const entry = entries.find(row => row.buff_key === statusKey);
+        if (!entry) continue;
+
+        if (tick.kind === 'heal') {
+    // DoTs need a source to scale from; fall back to a 1 HP tick.
+            if (entry.source_character_id) await triggerHeal(entry, tick);
+        } else {
+            await triggerLoss(entry, tick);
         }
     }
 
@@ -1376,6 +1443,39 @@ async function resolveTurnStartStatuses(client, actorId, clock) {
     let changed = false;
     let skipTurn = false;
 
+    const equipped = await getEquippedSkillKeys(client, actorId);
+    if (combat.hasGrit(equipped) && Number(actor.hp) <= 0) {
+        await client.query(
+            'UPDATE characters SET hp = $1 WHERE id = $2',
+            [0, actorId]
+        );
+        changed = true;
+        skipTurn = true;
+        const content =
+            `【扎根】：${actor.name} 於回合開始時 HP 為 0，陷入擊倒。`;
+        events.push(await insertBattleEvent(client, {
+            eventType: 'status_trigger',
+            round: clock.round,
+            turnPass: clock.turnPass,
+            actorId,
+            content
+        }));
+        messages.push(await insertChatMessage(client, {
+            channel: 'combat',
+            messageType: 'status',
+            characterId: actorId,
+            characterName: actor.name,
+            characterKind: actor.kind || 'player',
+            content,
+            payload: { statusKey: 'grit_ko' }
+        }));
+        return { skipTurn, events, messages, charactersChanged: changed };
+    }
+
+    if (Number(actor.hp) <= 0) {
+        skipTurn = true;
+    }
+
     if (keys.has('frozen')) {
         await removeBuffKeys(client, actorId, ['frozen']);
         changed = true;
@@ -1396,7 +1496,7 @@ async function resolveTurnStartStatuses(client, actorId, clock) {
         await removeBuffKeys(client, actorId, ['feign_death']);
         changed = true;
 
-        const content = `【假死】發動：${actor.name} 在回合開始時恢復至 1 HP。`;
+        const content = `【假死】發動：${actor.name} 於回合開始時恢復到 1 HP。`;
         events.push(await insertBattleEvent(client, {
             eventType: 'status_trigger',
             round: clock.round,
@@ -1507,35 +1607,34 @@ async function findUsableTurnActor(client, combatants, startIndex, round, turnPa
 async function autoRecipientIds(client, actor, target, skill) {
     const side = actor.kind || 'player';
     const code = skill.targetCode || 'SELF';
+    const recipients = combat.recipientsSpec(skill);
 
-    // 這兩個效果明確以「自身所在排」為基準，不需要另外選一排。
-    if (['戰吼', '戰線保衛'].includes(skill.name)) {
+    if (recipients?.mode === 'same_row') {
         let ids = await sameRowCharacterIds(client, actor.id, {
             kind: side,
             includeAnchor: true
         });
-
         if (!ids.length) ids = [Number(actor.id)];
-
-        if (skill.name === '戰線保衛') {
+        if (recipients.excludeSelf) {
             ids = ids.filter(id => id !== Number(actor.id));
         }
-
         return ids;
     }
 
-    if (code === 'ALL_ALLIES') {
+    if (recipients?.mode === 'all_allies' || code === 'ALL_ALLIES') {
         const result = await client.query(
             'SELECT id FROM characters WHERE kind = $1 ORDER BY id',
             [side]
         );
         let ids = result.rows.map(row => Number(row.id));
-
-        if (skill.name === '鋼鐵帷幕') {
+        if (recipients?.excludeSelf) {
             ids = ids.filter(id => id !== Number(actor.id));
         }
-
         return ids;
+    }
+
+    if (recipients?.mode === 'self' || combat.applySelfStatus(skill)) {
+        return [Number(actor.id)];
     }
 
     if (code === 'ALLY_ROW') {
@@ -1546,8 +1645,7 @@ async function autoRecipientIds(client, actor, target, skill) {
         });
 
         if (!ids.length) ids = [Number(anchorId)];
-
-        if (skill.name === '戰線保衛') {
+        if (recipients?.excludeSelf) {
             ids = ids.filter(id => id !== Number(actor.id));
         }
 
@@ -1575,54 +1673,21 @@ async function autoRecipientIds(client, actor, target, skill) {
 }
 
 function autoBuffForSkill(skill) {
-    const byName = {
-        '進攻指令': 'attack_order',
-        '戰吼': 'war_cry',
-        '加速': 'acceleration',
-        '進攻架勢': 'attack_stance',
-        '戰爭號角': 'war_horn',
-
-        '挑釁': 'taunt',
-        '吸引目光': 'taunt',
-        '堅守': 'steadfast',
-        '震怒': 'rage',
-        '防守姿態': 'defensive_stance',
-        '鋼鐵帷幕': 'steel_curtain',
-        '戰線保衛': 'battleline_defense',
-        '生命護盾': 'life_shield',
-        '狂暴': 'berserk',
-        '死鬥': 'duel',
-
-        '鋒銳': 'sharpness',
-        '蜃景': 'mirage',
-        '視線轉移': 'dodge_down_50pct',
-        '假死': 'feign_death',
-
-        '賦能': 'empower',
-        '防護指令': 'defense_order',
-        '純淨領域': 'sanctuary',
-        '狙擊指令': 'sniper_order',
-        '再生': 'regeneration',
-        '快速詠唱': 'quick_cast',
-        '飛速指令': 'swift_order',
-        '格擋指令': 'auto_guard',
-        '行進指令': 'marching_order',
-        '隨風而行': 'wind_walk',
-        '障壁': 'barrier',
-
-        '束縛': 'block_seal',
-        '破陣': 'break_formation'
-    };
-
-    return byName[skill?.name] || null;
+    const keys = statusesForSkill(skill);
+    return keys.length ? keys : null;
 }
 
 function skillBuffExpiresRound(skill, currentRound) {
     const text = String(skill?.effect || '');
-
-    // 規則：除非另有註明，所有非永久持續性增減益與特殊狀態在輪結束時解除。
     if (text.includes('整場戰鬥') || text.includes('永久')) return null;
-    return currentRound;
+
+    const grants = statusesForSkill(skill);
+    for (const grant of grants) {
+        if (typeof grant === 'string') {
+            return statusExpiresRound(grant, currentRound);
+        }
+    }
+    return combat.statusExpiresRound({ duration: { type: 'round_end' } }, currentRound);
 }
 
 
@@ -1650,6 +1715,7 @@ function mapCharacter(row, buffs = [], equippedSkills = []) {
         image: row.image_path,
         profession: row.profession || '',
         skillSlots: Math.max(0, Number(row.skill_slots ?? 1)),
+        reactionDefaultSkip: Boolean(row.reaction_default_skip),
         buffs,
         equippedSkills,
         effective: effectiveStatsFromBuffs(row, buffs)
@@ -1674,17 +1740,57 @@ async function getBuffsByCharacterIds(characterIds) {
         ORDER BY id
     `, [characterIds]);
 
+    const sourceIds = [
+        ...new Set(
+            result.rows
+                .map(row => Number(row.source_character_id))
+                .filter(Boolean)
+        )
+    ];
+    const sourceNameById = new Map();
+    if (sourceIds.length) {
+        const sources = await pool.query(
+            'SELECT id, name FROM characters WHERE id = ANY($1::int[])',
+            [sourceIds]
+        );
+        for (const row of sources.rows) {
+            sourceNameById.set(Number(row.id), row.name);
+        }
+    }
+
     for (const row of result.rows) {
-        const buff = BUFF_CATALOG[row.buff_key];
-        if (!buff) continue;
         if (!map.has(row.character_id)) map.set(row.character_id, []);
+
+        let sourceSkillName = null;
+        if (row.source_skill_key) {
+            const skill =
+                SKILL_CATALOG[row.source_skill_key] ||
+                ALL_EQUIPPABLE_SKILLS.get(row.source_skill_key);
+            sourceSkillName = skill?.name || row.source_skill_key;
+        }
+
+        const sourceCharacterId = row.source_character_id === null
+            ? null
+            : Number(row.source_character_id);
+        const sourceCharacterName = sourceCharacterId
+            ? (sourceNameById.get(sourceCharacterId) || null)
+            : null;
+
+        const valueNum = row.value_num === null ? null : Number(row.value_num);
+        const buff = lookupBuff(row.buff_key, valueNum);
+        if (!buff) continue;
+
         map.get(row.character_id).push({
             ...buff,
+            key: row.buff_key,
+            dbKey: row.buff_key,
             sourceSkillKey: row.source_skill_key,
-            sourceCharacterId: row.source_character_id,
+            sourceSkillName,
+            sourceCharacterId,
+            sourceCharacterName,
             expiresRound: row.expires_round === null ? null : Number(row.expires_round),
             stackCount: Math.max(1, Number(row.stack_count || 1)),
-            valueNum: row.value_num === null ? null : Number(row.value_num)
+            valueNum
         });
     }
 
@@ -1967,83 +2073,129 @@ async function getCombatState(db = pool, lock = false) {
 async function resolvePendingActionsForActor(client, actorId, clock = null) {
     if (!actorId) return { messages: [], events: [], charactersChanged: false };
 
-    const pendingResult = await client.query(`
-        SELECT
-            p.*,
-            a.name AS actor_name,
-            a.kind AS actor_kind,
-            t.name AS target_name,
-            t.hp AS target_hp,
-            t.max_hp AS target_max_hp
-        FROM pending_actions p
-        JOIN characters a ON a.id = p.actor_id
-        JOIN characters t ON t.id = p.target_id
-        WHERE p.actor_id = $1
-        ORDER BY p.id
-        FOR UPDATE OF p
-    `, [actorId]);
+    const eventClock = clock || await getBattleClock(client);
+    const { ready, progressed } = await combat.tickChargesForActor(client, actorId);
 
     const messages = [];
     const events = [];
     let charactersChanged = false;
 
-    for (const pending of pendingResult.rows) {
-        if (pending.skill_key === 'rescue') {
+    for (const row of progressed) {
+        if (ready.some(item => Number(item.id) === Number(row.id))) continue;
+        const content =
+            `⏳ ${row.payload?.skillName || '戰技'} 蓄力中` +
+            `（${row.charge_progress}/${row.charge_required}）`;
+        messages.push(await insertChatMessage(client, {
+            channel: 'combat',
+            messageType: 'status',
+            characterId: actorId,
+            characterName: (await client.query(
+                'SELECT name, kind FROM characters WHERE id = $1',
+                [actorId]
+            )).rows[0]?.name || '角色',
+            characterKind: 'player',
+            content,
+            payload: { charging: true, pendingId: row.id }
+        }));
+    }
+
+    for (const pending of ready) {
+        if (pending.skill_key === 'rescue' || pending.skill_key === 'initial:救援') {
+            const target = await client.query(
+                'SELECT name, hp, max_hp FROM characters WHERE id = $1 FOR UPDATE',
+                [pending.target_id]
+            );
+            const actor = await client.query(
+                'SELECT name, kind FROM characters WHERE id = $1',
+                [actorId]
+            );
+            const t = target.rows[0];
+            const a = actor.rows[0];
             let content;
-
-            if (Number(pending.target_hp) <= 0) {
-                await client.query(`
-                    UPDATE characters
-                    SET hp = LEAST(max_hp, 1)
-                    WHERE id = $1
-                `, [pending.target_id]);
-
+            if (t && Number(t.hp) <= 0) {
+                await client.query(
+                    'UPDATE characters SET hp = LEAST(max_hp, 1) WHERE id = $1',
+                    [pending.target_id]
+                );
                 content =
-                    `✚ 「救援」完成\n` +
-                    `${pending.actor_name} 的蓄力完成。\n` +
-                    `${pending.target_name} HP 0 → 1`;
+                    `【救援】成功\n${a.name} 完成救援。\n${t.name} HP 0 → 1`;
                 charactersChanged = true;
             } else {
                 content =
-                    `✚ 「救援」失去目標\n` +
-                    `${pending.target_name} 已不再是被擊倒狀態。`;
+                    `【救援】失敗目標\n${t?.name || '目標'} 已不再是被擊倒狀態。`;
             }
-
-            const message = await insertChatMessage(client, {
+            messages.push(await insertChatMessage(client, {
                 channel: 'combat',
                 messageType: 'skill',
-                characterId: pending.actor_id,
-                characterName: pending.actor_name,
-                characterKind: pending.actor_kind || 'player',
+                characterId: actorId,
+                characterName: a?.name || '角色',
+                characterKind: a?.kind || 'player',
                 content,
-                payload: {
-                    skillKey: 'rescue',
-                    targetId: pending.target_id,
-                    resolved: true
-                }
-            });
-
-            messages.push(message);
-
-            const eventClock = clock || await getBattleClock(client);
-            const battleEvent = await insertBattleEvent(client, {
+                payload: { skillKey: pending.skill_key, resolved: true }
+            }));
+            events.push(await insertBattleEvent(client, {
                 eventType: 'rescue',
                 round: eventClock.round,
                 turnPass: eventClock.turnPass,
-                actorId: pending.actor_id,
+                actorId,
                 targetId: pending.target_id,
-                content: Number(pending.target_hp) <= 0
-                    ? `${pending.target_name} 因 ${pending.actor_name} 的「救援」恢復至 1 HP。`
-                    : `${pending.actor_name} 的「救援」失去目標：${pending.target_name} 已不再是擊倒狀態。`,
-                payload: { skillKey: 'rescue', resolved: true }
+                content,
+                payload: { skillKey: pending.skill_key, resolved: true }
+            }));
+        } else {
+            // Generic charge complete ??keep pending for autoCast on this turn
+            const actor = await client.query(
+                'SELECT name, kind FROM characters WHERE id = $1',
+                [actorId]
+            );
+            const a = actor.rows[0];
+            const skillName = pending.payload?.skillName || pending.skill_key;
+            messages.push(await insertChatMessage(client, {
+                channel: 'combat',
+                messageType: 'skill',
+                characterId: actorId,
+                characterName: a?.name || '角色',
+                characterKind: a?.kind || 'player',
+                content: `⏳ 蓄力完成：自動發動「${skillName}」`,
+                payload: {
+                    skillKey: pending.skill_key,
+                    autoCast: true,
+                    targetId: pending.target_id,
+                    pendingId: pending.id
+                }
+            }));
+            events.push({
+                autoCast: true,
+                skillKey: pending.skill_key,
+                targetId: pending.target_id,
+                pendingId: pending.id,
+                actorId
             });
-            events.push(battleEvent);
+            // Do not clear pending here ??use-skill autoCast clears after firing
+            continue;
         }
 
-        await client.query('DELETE FROM pending_actions WHERE id = $1', [pending.id]);
+        await combat.clearCharge(client, pending.id);
+        await removeBuffKeys(client, actorId, ['charging']);
+        charactersChanged = true;
     }
 
-    return { messages, events, charactersChanged };
+    // Keep charging status while any pending remains
+    const remaining = await combat.getActiveCharges(client, actorId);
+    if (remaining.length) {
+        await applyBuffToCharacters(client, [actorId], 'charging', {
+            expiresRound: null,
+            valueNum: remaining[0].charge_progress
+        });
+        charactersChanged = true;
+    }
+
+    return {
+        messages,
+        events,
+        charactersChanged,
+        autoCastQueue: events.filter(item => item.autoCast)
+    };
 }
 
 async function broadcastCombatState() {
@@ -2066,7 +2218,7 @@ const upload = multer({
     limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter: (_req, file, callback) => {
         if (!file.mimetype?.startsWith('image/')) {
-            return callback(new Error('只允許上傳圖片'));
+            return callback(new Error('不允許的檔案類型'));
         }
         callback(null, true);
     }
@@ -2105,7 +2257,7 @@ app.put('/api/characters/:id/skills/:slotIndex', async (req, res) => {
 
         if (!characterResult.rows.length) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: '找不到這個角色' });
+            return res.status(404).json({ error: 'error' });
         }
 
         const character = characterResult.rows[0];
@@ -2121,7 +2273,7 @@ app.put('/api/characters/:id/skills/:slotIndex', async (req, res) => {
 
         if (slotIndex < 0 || slotIndex >= skillSlots) {
             await client.query('ROLLBACK');
-            return res.status(400).json({ error: '這個戰技欄不存在' });
+            return res.status(400).json({ error: '找不到這個反應戰技' });
         }
 
         if (professionChanged || skillSlotsChanged) {
@@ -2146,7 +2298,7 @@ app.put('/api/characters/:id/skills/:slotIndex', async (req, res) => {
 
             if (!skill || !skillAllowedForProfession(skill, requestedProfession)) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ error: '這個戰技不能由目前職業攜帶' });
+                return res.status(400).json({ error: 'error' });
             }
 
             // 同一角色不重複攜帶相同戰技；若已在其他欄，改成移到新欄。
@@ -2175,13 +2327,41 @@ app.put('/api/characters/:id/skills/:slotIndex', async (req, res) => {
 });
 
 app.get('/api/buffs/catalog', (_req, res) => {
+    const manuals = listManualStatuses()
+        .map(buff => ({
+            ...buff,
+            categoryLabel:
+                buff.kind === 'special'
+                    ? '特殊狀態'
+                    : buff.subtype === 'abnormal'
+                        ? '異常狀態'
+                        : buff.kind === 'debuff'
+                            ? '減益'
+                            : '增益'
+        }));
+
+    manuals.push({
+        key: '__parametric_mod__',
+        name: '數值修正',
+        effect: '自訂能力值百分比或固定值修正',
+        icon: 'stat_up',
+        kind: 'buff',
+        manual: true,
+        parametricPicker: true,
+        categoryLabel: '數值修正',
+        stats: combat.STAT_KEYS.map(stat => ({
+            key: stat,
+            label: combat.STAT_LABELS[stat]
+        })),
+        modes: combat.STAT_MODES.slice()
+    });
+
     res.json(
-        Object.values(BUFF_CATALOG)
-            .filter(buff => buff.hidden !== true)
-            .sort((a, b) =>
-                String(a.kind || 'buff').localeCompare(String(b.kind || 'buff')) ||
-                String(a.name).localeCompare(String(b.name), 'zh-Hant')
-            )
+        manuals.sort((a, b) =>
+            String(a.kind || 'buff').localeCompare(String(b.kind || 'buff')) ||
+            String(a.subtype || '').localeCompare(String(b.subtype || '')) ||
+            String(a.name).localeCompare(String(b.name), 'zh-Hant')
+        )
     );
 });
 
@@ -2228,7 +2408,7 @@ app.post('/api/characters', upload.single('image'), async (req, res) => {
             imagePath
         ];
 
-        if (!values[0]) return res.status(400).json({ error: '名稱不能是空白' });
+        if (!values[0]) return res.status(400).json({ error: 'error' });
 
         const result = await pool.query(`
             INSERT INTO characters (
@@ -2266,7 +2446,7 @@ app.patch('/api/characters/:id', async (req, res) => {
 
         if (!currentResult.rows.length) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: '找不到這個角色' });
+            return res.status(404).json({ error: 'error' });
         }
 
         const current = currentResult.rows[0];
@@ -2365,7 +2545,7 @@ app.delete('/api/characters/:id', async (req, res) => {
 
         if (!result.rows.length) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: '找不到這個角色' });
+            return res.status(404).json({ error: 'error' });
         }
 
         await client.query('COMMIT');
@@ -2395,7 +2575,7 @@ app.patch('/api/characters/:id/stat', async (req, res) => {
         sp: ['sp', 'max_sp']
     };
 
-    if (!columns[statType]) return res.status(400).json({ error: '不支援這個屬性' });
+    if (!columns[statType]) return res.status(400).json({ error: 'error' });
     const [currentColumn, maxColumn] = columns[statType];
 
     try {
@@ -2406,7 +2586,7 @@ app.patch('/api/characters/:id/stat', async (req, res) => {
             RETURNING *
         `, [delta, characterId]);
 
-        if (!result.rows.length) return res.status(404).json({ error: '找不到這個角色' });
+        if (!result.rows.length) return res.status(404).json({ error: 'error' });
 
         const [buffsMap, skillsMap] = await Promise.all([
             getBuffsByCharacterIds([characterId]),
@@ -2419,163 +2599,169 @@ app.patch('/api/characters/:id/stat', async (req, res) => {
         ));
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: '更新屬性失敗' });
+        res.status(500).json({ error: 'error' });
     }
 });
 
 app.post('/api/characters/:id/buffs', async (req, res) => {
     const characterId = number(req.params.id);
     const buffKey = String(req.body.buffKey || '');
-    const sourceCharacterId = number(req.body.sourceCharacterId, characterId);
-
-    if (!BUFF_CATALOG[buffKey]) return res.status(400).json({ error: '未知的 Buff' });
+    const sourceCharacterId = number(req.body.sourceCharacterId, 0) || null;
+    const valueNum = req.body.valueNum === undefined || req.body.valueNum === null
+        ? null
+        : Math.trunc(Number(req.body.valueNum));
+    const modStat = req.body.stat ? String(req.body.stat) : null;
+    const modMode = req.body.mode ? String(req.body.mode) : null;
 
     try {
         const exists = await pool.query('SELECT id FROM characters WHERE id = $1', [characterId]);
-        if (!exists.rows.length) return res.status(404).json({ error: '找不到這個角色' });
+        if (!exists.rows.length) return res.status(404).json({ error: 'error' });
 
-        await pool.query(`
-            INSERT INTO character_buffs (
-                character_id, buff_key, source_skill_key,
-                source_character_id, expires_round, stack_count, value_num
-            )
-            VALUES ($1, $2, NULL, $3, NULL, 1, NULL)
-            ON CONFLICT (character_id, buff_key)
-            DO UPDATE SET
-                source_skill_key = NULL,
-                source_character_id = NULL,
-                expires_round = NULL,
-                stack_count = 1,
-                value_num = NULL,
-                created_at = NOW()
-        `, [characterId, buffKey, sourceCharacterId]);
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            const clock = await getBattleClock(client, false).catch(() => ({ round: 1 }));
+            const currentRound = Number(clock?.round || 1);
+
+            if (modStat && modMode) {
+                if (!combat.STAT_KEYS.includes(modStat) || !combat.STAT_MODES.includes(modMode)) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({ error: 'error' });
+                }
+                if (valueNum == null || !Number.isFinite(valueNum) || valueNum === 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({ error: '請輸入非零整數效果值' });
+                }
+                await combat.applyStatMod(client, [characterId], {
+                    stat: modStat,
+                    mode: modMode,
+                    value: valueNum,
+                    sourceCharacterId: sourceCharacterId || characterId,
+                    expiresRound: combat.statusExpiresRound(
+                        { duration: { type: 'round_end' } },
+                        currentRound
+                    )
+                });
+            } else if (combat.isModKey(buffKey)) {
+                if (valueNum == null || !Number.isFinite(valueNum) || valueNum === 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({ error: '參數錯誤：需要整數 valueNum' });
+                }
+                const parsed = combat.parseModKey(buffKey);
+                await combat.applyStatMod(client, [characterId], {
+                    ...parsed,
+                    value: valueNum,
+                    sourceCharacterId: sourceCharacterId || characterId,
+                    expiresRound: combat.statusExpiresRound(
+                        { duration: { type: 'round_end' } },
+                        currentRound
+                    )
+                });
+            } else {
+                const def = lookupBuff(buffKey);
+                if (!def && !expandStatusGrants(buffKey).length) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({ error: '未知狀態效果' });
+                }
+                if (def?.manualValue) {
+                    if (valueNum == null || !Number.isFinite(valueNum) || valueNum <= 0) {
+                        await client.query('ROLLBACK');
+                        return res.status(400).json({ error: '請輸入正整數效果值（每次損失的 HP）' });
+                    }
+                }
+                if (def?.manualSource) {
+                    if (!sourceCharacterId) {
+                        await client.query('ROLLBACK');
+                        return res.status(400).json({ error: '請選擇施加者' });
+                    }
+                }
+                if (def?.manualLink) {
+                    if (valueNum == null || !Number.isFinite(valueNum) || valueNum <= 0) {
+                        await client.query('ROLLBACK');
+                        return res.status(400).json({ error: '請選擇指定對象' });
+                    }
+                }
+
+                const expiresRound = statusExpiresRound(buffKey, currentRound);
+                await applyBuffToCharacters(client, [characterId], buffKey, {
+                    sourceCharacterId: sourceCharacterId || (
+                        def?.manualSource ? null : characterId
+                    ),
+                    valueNum,
+                    expiresRound,
+                    sourceSnapshot: def?.manualValue
+                        ? { tickBase: valueNum }
+                        : null
+                });
+            }
+
+            await client.query('COMMIT');
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
 
         const character = await getCharacterById(characterId);
         res.json(character);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: '新增 Buff 失敗' });
+        res.status(500).json({ error: error.message || 'error' });
     }
 });
 
 app.delete('/api/characters/:id/buffs/:buffKey', async (req, res) => {
     const characterId = number(req.params.id);
-    const buffKey = String(req.params.buffKey || '');
+    const buffKey = decodeURIComponent(String(req.params.buffKey || ''));
 
     try {
+        const relatedLegacy = Object.entries(LEGACY_STATUS_EXPAND)
+            .filter(([, keys]) =>
+                Array.isArray(keys) &&
+                keys.some(item => item === buffKey)
+            )
+            .map(([legacyKey]) => legacyKey);
+        const keysToDelete = [...new Set([buffKey, ...relatedLegacy])];
+
         await pool.query(
-            'DELETE FROM character_buffs WHERE character_id = $1 AND buff_key = $2',
-            [characterId, buffKey]
+            'DELETE FROM character_buffs WHERE character_id = $1 AND buff_key = ANY($2::text[])',
+            [characterId, keysToDelete]
         );
 
         const character = await getCharacterById(characterId);
-        if (!character) return res.status(404).json({ error: '找不到這個角色' });
+        if (!character) return res.status(404).json({ error: 'error' });
         res.json(character);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: '移除 Buff 失敗' });
+        res.status(500).json({ error: 'error' });
     }
 });
 
 
 
 function parseCost(costText) {
-    const text = String(costText || '');
-    const ap = text.match(/(\d+)\s*AP/i);
-    const sp = text.match(/(\d+)\s*SP/i) || text.match(/(\d+)\s*\+\s*SP/i);
-    // 像 1AP/1SP 的主動戰技，第一版手動發動時優先使用 AP。
-    if (ap) return { type: 'ap', amount: Number(ap[1]) };
-    if (sp) return { type: 'sp', amount: Number(sp[1]) };
-    return { type: null, amount: 0 };
+    return combat.parseCost(costText);
 }
 
 function parseDamagePackets(effect) {
-    const packets = [];
-    const text = String(effect || '');
-    const patterns = [
-        /【([0-9.]+)(?:x(\d+))?(物理|魔法)(?:x(\d+))?】/g,
-        /【(物理|魔法)([0-9.]+)(?:x(\d+))?】/g
-    ];
-
-    let match;
-    while ((match = patterns[0].exec(text))) {
-        packets.push({
-            multiplier: Number(match[1]),
-            hits: Number(match[2] || match[4] || 1),
-            damageType: match[3]
-        });
-    }
-    while ((match = patterns[1].exec(text))) {
-        packets.push({
-            multiplier: Number(match[2]),
-            hits: Number(match[3] || 1),
-            damageType: match[1]
-        });
-    }
-    return packets;
+    return combat.parseDamagePackets(effect);
 }
 
 function targetAllowed(skill, actor, target) {
-    if (!actor || !target) return false;
-
-    const sameSide = (actor.kind || 'player') === (target.kind || 'player');
-    const code = skill.targetCode || 'SELF';
-    const effect = String(skill.effect || '');
-    const requiresOtherAlly = effect.includes('其他友方');
-
-    if (skill.actionCode === 'ATTACK') {
-        if (code === 'ANY_ORTHOGONAL') {
-            return Number(actor.hp) > 0;
-        }
-        return !sameSide && Number(target.hp) > 0;
-    }
-
-    if (skill.actionCode === 'HEAL') {
-        if (!sameSide) return false;
-        if (code === 'ALLY_DOWN') {
-            return actor.id !== target.id && Number(target.hp) <= 0;
-        }
-        if (code === 'SELF') return actor.id === target.id;
-        if (requiresOtherAlly && actor.id === target.id) return false;
-        return true;
-    }
-
-    if (skill.actionCode === 'DEBUFF') {
-        return !sameSide && Number(target.hp) > 0;
-    }
-
-    if (code === 'ALLY_DOWN') {
-        return sameSide && actor.id !== target.id && Number(target.hp) <= 0;
-    }
-
-    if (['ALLY','ALLY_ROW','ALL_ALLIES','ALLY_OR_SELF'].includes(code)) {
-        if (!sameSide) return false;
-        if (requiresOtherAlly && actor.id === target.id) return false;
-        return true;
-    }
-
-    if (['ENEMY','ENEMY_ROW','ALL_ENEMIES'].includes(code)) {
-        return !sameSide && Number(target.hp) > 0;
-    }
-
-    if (code === 'SELF') return actor.id === target.id;
-    return true;
+    return combat.targetAllowed(skill, actor, target);
 }
 
 async function spendSkillCost(client, actor, skill) {
-    const cost = parseCost(skill.cost);
+    const cost = combat.assertSkillCostAvailable(actor, skill);
     if (!cost.type || cost.amount <= 0) return cost;
-
-    const current = Number(actor[cost.type]);
-    if (current < cost.amount) {
-        throw new Error(`${actor.name} 的 ${cost.type.toUpperCase()} 不足`);
-    }
 
     await client.query(
         `UPDATE characters SET ${cost.type} = GREATEST(0, ${cost.type} - $1) WHERE id = $2`,
         [cost.amount, actor.id]
     );
-    actor[cost.type] = current - cost.amount;
+    actor[cost.type] = Number(actor[cost.type]) - cost.amount;
     return cost;
 }
 
@@ -2588,44 +2774,12 @@ async function actorHasSkill(client, actorId, skillKey) {
     return result.rows.length > 0;
 }
 
-
-const SUPPORTED_REACTION_SKILL_NAMES = new Set([
-    // 攻擊指定時
-    '守護',
-    '奉獻',
-    '快速移位',
-    '障壁',
-    '偏斜',
-    '撥擋',
-    '箭擊掩護',
-    '重擊聲援',
-    '破陣',
-    '精準打擊',
-    '鋒銳',
-    '獵鷹之眼',
-    '光導',
-
-    // 行動 / 傷害後
-    '快速治療',
-    '重燃',
-    '預後',
-    '堅守',
-    '震怒',
-    '沉重反擊',
-    '城墻反擊'
-]);
-
 function isContextReactionSkill(skill) {
-    return Boolean(
-        skill &&
-        SUPPORTED_REACTION_SKILL_NAMES.has(skill.name)
-    );
+    return combat.isReactionSkill(skill);
 }
 
 function reactionCostAvailable(character, skill) {
-    const cost = parseCost(skill?.cost);
-    if (!cost.type || cost.amount <= 0) return true;
-    return Number(character?.[cost.type] || 0) >= cost.amount;
+    return combat.reactionCostAvailable(character, skill);
 }
 
 async function equippedSkillRows(client) {
@@ -2639,165 +2793,113 @@ async function equippedSkillRows(client) {
         ORDER BY c.id, cs.slot_index
     `);
 
-    return result.rows
+    const rows = result.rows
         .map(row => ({
             character: row,
-            skill: ALL_EQUIPPABLE_SKILLS.get(row.skill_key)
+            skill: ALL_EQUIPPABLE_SKILLS.get(row.skill_key) ||
+                SKILL_CATALOG[row.skill_key] ||
+                null
         }))
         .filter(item => item.skill);
+
+    // Initial skills (e.g. 基礎格擋) are always available but not stored in
+    // character_skills — inject them for every living combatant so reactions
+    // like ON_TARGET_DECLARED (基礎格擋) can match.
+    const living = await client.query(`
+        SELECT *
+        FROM characters
+        WHERE hp > 0
+        ORDER BY id
+    `);
+    const initialSkills = Object.values(SKILL_CATALOG).filter(skill =>
+        combat.isReactionSkill(skill)
+    );
+    for (const character of living.rows) {
+        for (const skill of initialSkills) {
+            rows.push({ character, skill });
+        }
+    }
+
+    return rows;
 }
 
 function reactionOptionId(actorId, skillKey, targetId = 0) {
-    return `${Number(actorId)}:${skillKey}:${Number(targetId || 0)}`;
+    return combat.reactionOptionId(actorId, skillKey, targetId);
 }
 
-function reactionOption(character, skill, {
-    targetId = null,
-    targetName = '',
-    note = '',
-    meta = {}
-} = {}) {
-    return {
-        id: reactionOptionId(character.id, skill.key, targetId),
-        actorId: Number(character.id),
-        actorName: character.name,
-        actorKind: character.kind || 'player',
-        skillKey: skill.key,
-        skillName: skill.name,
-        timing: skill.timing,
-        cost: skill.cost,
-        weapon: skill.weapon,
-        effect: skill.effect,
-        targetId: targetId === null ? null : Number(targetId),
-        targetName,
-        note,
-        meta
+function reactionOption(character, skill, opts = {}) {
+    const def = combat.getReactionDef(skill) || {
+        timingCode: combat.normalizeTimingCode(skill.timing),
+        effectId: skill.effectId || skill.name
     };
+    return combat.buildReactionOption(character, skill, def, opts);
 }
 
 function attackDescriptor(skill) {
-    const effect = String(skill?.effect || '');
-    const packets = parseDamagePackets(effect);
-
-    return {
-        melee: effect.includes('近戰攻擊'),
-        ranged: effect.includes('遠程攻擊'),
-        physical: packets.some(packet => packet.damageType === '物理'),
-        magical: packets.some(packet => packet.damageType === '魔法')
-    };
-}
-
-async function collectAttackDeclaredReactionOptions(
-    client,
-    actor,
-    target,
-    skill
-) {
-    const descriptor = attackDescriptor(skill);
-    const rows = await equippedSkillRows(client);
-    const options = [];
-
-    for (const { character, skill: reactionSkill } of rows) {
-        if (!isContextReactionSkill(reactionSkill)) continue;
-        if (!reactionCostAvailable(character, reactionSkill)) continue;
-
-        const reactorId = Number(character.id);
-        const actorId = Number(actor.id);
-        const targetId = Number(target.id);
-        const sameSideTarget =
-            (character.kind || 'player') === (target.kind || 'player');
-        const sameSideActor =
-            (character.kind || 'player') === (actor.kind || 'player');
-
-        let eligible = false;
-        let note = '';
-
-        switch (reactionSkill.name) {
-            case '守護':
-            case '奉獻':
-            case '快速移位':
-                eligible =
-                    sameSideTarget &&
-                    reactorId !== targetId;
-                note = `代替 ${target.name} 承受本次攻擊`;
-                break;
-
-            case '障壁':
-                eligible = sameSideTarget;
-                note = `使 ${target.name} 下一次受到的傷害 -25%`;
-                break;
-
-            case '偏斜':
-                eligible = reactorId === targetId;
-                note = '對本次攻擊進行格擋';
-                break;
-
-            case '撥擋':
-                eligible =
-                    reactorId === targetId &&
-                    descriptor.melee;
-                note = '使本次攻擊其中一段傷害無效，並 AP+1';
-                break;
-
-            case '箭擊掩護':
-                eligible =
-                    sameSideTarget &&
-                    reactorId !== targetId &&
-                    descriptor.ranged &&
-                    descriptor.physical;
-                note = `使 ${target.name} 本次遠程物理攻擊傷害無效`;
-                break;
-
-            case '重擊聲援':
-                eligible =
-                    sameSideActor &&
-                    reactorId !== actorId;
-                note = `使 ${actor.name} 本次攻擊暴擊率 +50%`;
-                break;
-
-            case '破陣':
-            case '精準打擊':
-            case '鋒銳':
-                eligible = reactorId === actorId;
-                break;
-
-            case '獵鷹之眼':
-                eligible =
-                    reactorId === actorId &&
-                    descriptor.ranged;
-                break;
-
-            case '光導':
-                eligible =
-                    sameSideActor &&
-                    reactorId !== actorId;
-                note = `支援 ${actor.name} 本次攻擊`;
-                break;
-        }
-
-        if (!eligible) continue;
-
-        options.push(reactionOption(character, reactionSkill, {
-            targetId,
-            targetName: target.name,
-            note,
-            meta: {
-                originalActorId: actorId,
-                originalTargetId: targetId,
-                descriptor
-            }
-        }));
-    }
-
-    return options;
+    return combat.attackDescriptor(skill);
 }
 
 function targetResultPhysicalHit(targetResult) {
-    return (targetResult?.packets || []).some(
-        packet =>
-            packet?.hit === true &&
-            packet?.damageType === '物理'
-    );
+    return combat.targetResultPhysicalHit(targetResult);
+}
+
+function timingPipelineDeps() {
+    return {
+        loadEquippedRows: equippedSkillRows,
+        createReactionWindow
+    };
+}
+
+async function loadFlowStack(client) {
+    const result = await client.query(`
+        SELECT flow_stack
+        FROM battle_state
+        WHERE id = 1
+        FOR UPDATE
+    `);
+    return combat.restoreStack(result.rows[0]?.flow_stack);
+}
+
+async function saveFlowStack(client, stack) {
+    await client.query(`
+        UPDATE battle_state
+        SET flow_stack = $1::jsonb,
+            updated_at = NOW()
+        WHERE id = 1
+    `, [JSON.stringify(combat.serializeStack(stack || []))]);
+}
+
+async function clearFlowStack(client) {
+    await saveFlowStack(client, []);
+}
+
+async function hasOpenBlockingReaction(client) {
+    const result = await client.query(`
+        SELECT id
+        FROM reaction_windows
+        WHERE status IN ('open', 'ready', 'queued')
+          AND blocking = TRUE
+        ORDER BY id DESC
+        LIMIT 1
+    `);
+    return result.rows.length > 0;
+}
+
+async function assertFreeTimingForActiveSkill(client, skill) {
+    if (!combat.isActiveSkill(skill)) return;
+
+    const stack = await loadFlowStack(client);
+    if (combat.isStackBusy(stack)) {
+        const error = new Error('此動作不是經由當前反應視窗發起');
+        error.status = 409;
+        throw error;
+    }
+
+    if (await hasOpenBlockingReaction(client)) {
+    const error = new Error('此動作不是經由當前反應視窗發起');
+        error.status = 409;
+        throw error;
+    }
 }
 
 async function collectPostActionReactionOptions(
@@ -2807,171 +2909,71 @@ async function collectPostActionReactionOptions(
     payload,
     cost
 ) {
-    const rows = await equippedSkillRows(client);
-    const options = [];
-    const damages = Array.isArray(payload?.targets) ? payload.targets : [];
+    const rawTargets = Array.isArray(payload?.targets) ? payload.targets : [];
     const heals = Array.isArray(payload?.heals) ? payload.heals : [];
 
-    for (const { character, skill: reactionSkill } of rows) {
-        if (!isContextReactionSkill(reactionSkill)) continue;
-        if (!reactionCostAvailable(character, reactionSkill)) continue;
-
-        const reactorId = Number(character.id);
-        const sourceActorId = Number(actor.id);
-        const sameSideSource =
-            (character.kind || 'player') === (actor.kind || 'player');
-
-        if (reactionSkill.name === '快速治療') {
-            for (const damage of damages) {
-                const targetRow = await client.query(
-                    'SELECT id, name, kind, hp FROM characters WHERE id = $1',
-                    [damage.targetId]
-                );
-                const damaged = targetRow.rows[0];
-                if (!damaged) continue;
-
-                const sameSide =
-                    (character.kind || 'player') ===
-                    (damaged.kind || 'player');
-
-                if (
-                    sameSide &&
-                    Number(damage.hpLoss || 0) > 0 &&
-                    Number(damaged.hp) > 0
-                ) {
-                    options.push(reactionOption(character, reactionSkill, {
-                        targetId: damaged.id,
-                        targetName: damaged.name,
-                        note: `${damaged.name} 剛受到 ${damage.hpLoss} 點 HP 傷害`,
-                        meta: {
-                            damagedTargetId: Number(damaged.id),
-                            sourceActorId
-                        }
-                    }));
-                }
-            }
-            continue;
-        }
-
-        if (reactionSkill.name === '堅守') {
-            const selfDamage = damages.find(
-                item =>
-                    Number(item.targetId) === reactorId &&
-                    Number(item.hpLoss || 0) > 0 &&
-                    targetResultPhysicalHit(item)
+    const targets = [];
+    for (const damage of rawTargets) {
+        const enriched = { ...damage };
+        if (!enriched.targetSnapshot || enriched.hpAfter == null) {
+            const row = await client.query(
+                'SELECT id, name, kind, hp FROM characters WHERE id = $1',
+                [damage.targetId]
             );
-
-            if (selfDamage) {
-                options.push(reactionOption(character, reactionSkill, {
-                    targetId: reactorId,
-                    targetName: character.name,
-                    note: '自身剛受到物理傷害，可疊加堅守'
-                }));
-            }
-            continue;
-        }
-
-        if (reactionSkill.name === '震怒') {
-            const allyDamage = damages.find(item => {
-                if (Number(item.hpLoss || 0) <= 0) return false;
-                if (Number(item.targetId) === reactorId) return false;
-
-                const target = item.targetSnapshot;
-                if (target?.kind) {
-                    return target.kind === (character.kind || 'player');
-                }
-                return true;
-            });
-
-            if (allyDamage) {
-                options.push(reactionOption(character, reactionSkill, {
-                    targetId: reactorId,
-                    targetName: character.name,
-                    note: '其他友方剛受到傷害'
-                }));
-            }
-            continue;
-        }
-
-        if (reactionSkill.name === '沉重反擊') {
-            const selfAttack = damages.find(
-                item => Number(item.targetId) === reactorId
-            );
-
-            if (selfAttack && skill.actionCode === 'ATTACK') {
-                options.push(reactionOption(character, reactionSkill, {
-                    targetId: sourceActorId,
-                    targetName: actor.name,
-                    note: `對 ${actor.name} 進行反擊`,
-                    meta: { sourceActorId }
-                }));
-            }
-            continue;
-        }
-
-        if (reactionSkill.name === '城墻反擊') {
-            const selfAttack = damages.find(
-                item => Number(item.targetId) === reactorId
-            );
-
-            if (
-                selfAttack &&
-                skill.actionCode === 'ATTACK' &&
-                Number(selfAttack.hpLoss || 0) < 1
-            ) {
-                options.push(reactionOption(character, reactionSkill, {
-                    targetId: sourceActorId,
-                    targetName: actor.name,
-                    note: '本次攻擊造成低於 1 點 HP 傷害',
-                    meta: { sourceActorId }
-                }));
-            }
-            continue;
-        }
-
-        if (reactionSkill.name === '重燃') {
-            if (
-                cost?.type === 'sp' &&
-                Number(cost.amount || 0) > 0 &&
-                sameSideSource &&
-                reactorId !== sourceActorId
-            ) {
-                options.push(reactionOption(character, reactionSkill, {
-                    targetId: sourceActorId,
-                    targetName: actor.name,
-                    note: `${actor.name} 剛消耗 SP 發動輔助戰技`
-                }));
-            }
-            continue;
-        }
-
-        if (reactionSkill.name === '預後') {
-            if (
-                reactorId === sourceActorId &&
-                heals.some(item => Number(item.heal || 0) > 0)
-            ) {
-                options.push(reactionOption(character, reactionSkill, {
-                    targetId: sourceActorId,
-                    targetName: actor.name,
-                    note: '自身剛造成恢復效果，可把 50% 實際治療量轉成護盾',
-                    meta: {
-                        heals: heals.filter(
-                            item => Number(item.heal || 0) > 0
-                        )
-                    }
-                }));
+            if (row.rows[0]) {
+                enriched.targetSnapshot = {
+                    id: row.rows[0].id,
+                    name: row.rows[0].name,
+                    kind: row.rows[0].kind,
+                    hp: Number(row.rows[0].hp)
+                };
+                enriched.targetName = enriched.targetName || row.rows[0].name;
+                enriched.targetKind = enriched.targetKind || row.rows[0].kind;
+                enriched.hpAfter = Number(row.rows[0].hp);
             }
         }
+        targets.push(enriched);
     }
 
-    // 同一角色 / 戰技 / 目標只保留一次。
-    const unique = new Map();
-    for (const option of options) unique.set(option.id, option);
-    return [...unique.values()];
+    const context = combat.createActionContext({
+        actionKind: 'skill',
+        actorId: actor.id,
+        actorName: actor.name,
+        actorKind: actor.kind || 'player',
+        targetId: payload?.targetId,
+        skillKey: skill.key,
+        skillName: skill.name,
+        actionCode: skill.actionCode,
+        logicCode: skill.logicCode,
+        cost,
+        results: {
+            targets,
+            heals
+        },
+        meta: {
+            skill,
+            targets,
+            heals
+        }
+    });
+
+    return combat.collectReactionOptions({
+        equippedRows: await equippedSkillRows(client),
+        timingCodes: combat.POST_SKILL_COLLECT_TIMINGS,
+        context,
+        actor,
+        target: null
+    });
 }
 
 function mapReactionWindow(row) {
     if (!row) return null;
+
+    const options = Array.isArray(row.options) ? row.options : [];
+    const context = row.context || {};
+    const reactorId = row.reactor_id != null
+        ? Number(row.reactor_id)
+        : Number(options[0]?.actorId || 0) || null;
 
     return {
         id: Number(row.id),
@@ -2981,16 +2983,122 @@ function mapReactionWindow(row) {
         sourceActorId: row.source_actor_id,
         sourceTargetId: row.source_target_id,
         sourceSkillKey: row.source_skill_key,
+        reactorId,
+        reactorName: options[0]?.actorName || context.reactorName || null,
+        reactorSpeed: context.reactorSpeed != null ? Number(context.reactorSpeed) : null,
+        batchOrder: context.batchOrder != null ? Number(context.batchOrder) : null,
+        batchId: row.batch_id || null,
         round: Number(row.round_number),
         turnPass: Number(row.turn_pass),
-        context: row.context || {},
-        options: Array.isArray(row.options) ? row.options : [],
+        context,
+        options,
         resumePayload: row.resume_payload || null,
         resolution: row.resolution || {},
         createdAt: row.created_at
     };
 }
 
+function groupReactionOptionsByReactor(options = []) {
+    const groups = new Map();
+    for (const option of options) {
+        const reactorId = Number(option?.actorId || 0);
+        if (!reactorId) continue;
+        if (!groups.has(reactorId)) groups.set(reactorId, []);
+        groups.get(reactorId).push(option);
+    }
+    return groups;
+}
+
+async function loadReactorInfoMap(client, characterIds = []) {
+    const ids = [...new Set(characterIds.map(Number).filter(Boolean))];
+    const map = new Map();
+    if (!ids.length) return map;
+
+    const result = await client.query(`
+        SELECT *
+        FROM characters
+        WHERE id = ANY($1::int[])
+    `, [ids]);
+    const buffsMap = await getBuffsByCharacterIds(ids);
+
+    for (const row of result.rows) {
+        const buffs = buffsMap.get(Number(row.id)) || [];
+        const effective = effectiveStatsFromBuffs(row, buffs);
+        map.set(Number(row.id), {
+            name: row.name,
+            kind: row.kind || 'player',
+            speed: Number(effective.speed ?? row.speed ?? 0),
+            defaultSkip: Boolean(row.reaction_default_skip)
+        });
+    }
+    return map;
+}
+
+function sortReactorIdsBySpeed(reactorIds, infoMap) {
+    return [...reactorIds].sort((a, b) => {
+        const speedA = Number(infoMap.get(Number(a))?.speed || 0);
+        const speedB = Number(infoMap.get(Number(b))?.speed || 0);
+        if (speedB !== speedA) return speedB - speedA;
+        return Number(a) - Number(b);
+    });
+}
+
+async function insertReactionWindowRow(client, {
+    triggerType,
+    blocking = false,
+    status = 'open',
+    sourceActorId = null,
+    sourceTargetId = null,
+    sourceSkillKey = null,
+    reactorId = null,
+    batchId = null,
+    round,
+    turnPass,
+    context = {},
+    options = [],
+    resumePayload = null,
+    resolution = {}
+}) {
+    const result = await client.query(`
+        INSERT INTO reaction_windows (
+            trigger_type, blocking, status,
+            source_actor_id, source_target_id, source_skill_key,
+            reactor_id, batch_id,
+            round_number, turn_pass,
+            context, options, resume_payload, resolution
+        )
+        VALUES (
+            $1, $2, $3,
+            $4, $5, $6,
+            $7, $8,
+            $9, $10,
+            $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb
+        )
+        RETURNING *
+    `, [
+        triggerType,
+        blocking,
+        status,
+        sourceActorId,
+        sourceTargetId,
+        sourceSkillKey,
+        reactorId,
+        batchId,
+        round,
+        turnPass,
+        JSON.stringify(context),
+        JSON.stringify(options),
+        resumePayload ? JSON.stringify(resumePayload) : null,
+        JSON.stringify(resolution || {})
+    ]);
+    return mapReactionWindow(result.rows[0]);
+}
+
+/**
+ * Create one reaction window per reactor, ordered by effective speed (high→low).
+ * Only the fastest non-auto-skip reactor starts `open`; others are `queued` and
+ * unlock after the previous reactor finishes.
+ */
 async function createReactionWindow(client, {
     triggerType,
     blocking = false,
@@ -3003,50 +3111,352 @@ async function createReactionWindow(client, {
     options = [],
     resumePayload = null
 }) {
-    if (!options.length) return null;
+    if (!options.length) return [];
 
-    const result = await client.query(`
-        INSERT INTO reaction_windows (
-            trigger_type, blocking, status,
-            source_actor_id, source_target_id, source_skill_key,
-            round_number, turn_pass,
-            context, options, resume_payload
-        )
-        VALUES (
-            $1, $2, 'open',
-            $3, $4, $5,
-            $6, $7,
-            $8::jsonb, $9::jsonb, $10::jsonb
-        )
-        RETURNING *
-    `, [
-        triggerType,
-        blocking,
+    const enrichedOptions = await enrichReactionOptionsWithPicks(client, options, {
         sourceActorId,
         sourceTargetId,
-        sourceSkillKey,
-        round,
-        turnPass,
-        JSON.stringify(context),
-        JSON.stringify(options),
-        resumePayload ? JSON.stringify(resumePayload) : null
-    ]);
+        attackSkill: sourceSkillKey
+            ? (ALL_EQUIPPABLE_SKILLS.get(sourceSkillKey) || SKILL_CATALOG[sourceSkillKey])
+            : null
+    });
 
-    return mapReactionWindow(result.rows[0]);
+    if (!enrichedOptions.length) return [];
+
+    const groups = groupReactionOptionsByReactor(enrichedOptions);
+    if (!groups.size) return [];
+
+    const batchId = crypto.randomUUID();
+    const infoMap = await loadReactorInfoMap(client, [...groups.keys()]);
+    const orderedIds = sortReactorIdsBySpeed([...groups.keys()], infoMap);
+    const windows = [];
+    let leadAssigned = false;
+    let openAssigned = false;
+
+    for (let index = 0; index < orderedIds.length; index += 1) {
+        const reactorId = Number(orderedIds[index]);
+        const reactorOptions = groups.get(reactorId) || [];
+        const info = infoMap.get(reactorId) || {};
+        const autoSkip = Boolean(info.defaultSkip);
+        const isLead = !leadAssigned;
+        if (isLead) leadAssigned = true;
+
+        let status = 'queued';
+        if (autoSkip) {
+            status = 'skipped';
+        } else if (!openAssigned) {
+            status = 'open';
+            openAssigned = true;
+        }
+
+        const window = await insertReactionWindowRow(client, {
+            triggerType,
+            blocking,
+            status,
+            sourceActorId,
+            sourceTargetId,
+            sourceSkillKey,
+            reactorId,
+            batchId,
+            round,
+            turnPass,
+            context: {
+                ...context,
+                reactorId,
+                reactorName: info.name || reactorOptions[0]?.actorName || null,
+                reactorSpeed: Number(info.speed || 0),
+                batchId,
+                batchOrder: index
+            },
+            options: autoSkip ? [] : reactorOptions,
+            resumePayload: isLead ? resumePayload : null,
+            resolution: autoSkip
+                ? { skipped: true, auto: true, reason: 'reaction_default_skip' }
+                : {}
+        });
+        windows.push(window);
+    }
+
+    // If the first slots were auto-skipped, promote the first queued to open.
+    if (!windows.some(item => item.status === 'open')) {
+        const next = await openNextQueuedReactionInBatch(client, batchId);
+        if (next) {
+            return windows.map(item =>
+                Number(item.id) === Number(next.id) ? next : item
+            );
+        }
+    }
+
+    const openCount = windows.filter(item => item.status === 'open').length;
+    const queuedCount = windows.filter(item => item.status === 'queued').length;
+    if (blocking && resumePayload && openCount === 0 && queuedCount === 0) {
+        const lead = windows.find(item => item.resumePayload) || windows[0];
+        if (lead) {
+            const result = await client.query(`
+                UPDATE reaction_windows
+                SET status = 'ready',
+                    resolved_at = NOW()
+                WHERE id = $1
+                RETURNING *
+            `, [lead.id]);
+            const ready = mapReactionWindow(result.rows[0]);
+            return windows.map(item =>
+                Number(item.id) === Number(ready.id) ? ready : item
+            );
+        }
+    }
+
+    return windows;
 }
 
-async function latestOpenReaction(db = pool) {
+async function listReactionBatch(client, batchId) {
+    if (!batchId) return [];
+    const result = await client.query(`
+        SELECT *
+        FROM reaction_windows
+        WHERE batch_id = $1
+        ORDER BY COALESCE((context->>'batchOrder')::int, id) ASC, id ASC
+        FOR UPDATE
+    `, [batchId]);
+    return result.rows.map(mapReactionWindow);
+}
+
+/**
+ * Unlock the next speed-ordered queued window in a batch.
+ */
+async function openNextQueuedReactionInBatch(client, batchId) {
+    if (!batchId) return null;
+    const windows = await listReactionBatch(client, batchId);
+    if (windows.some(item => item.status === 'open')) return null;
+
+    const next = windows.find(item => item.status === 'queued');
+    if (!next) return null;
+
+    const result = await client.query(`
+        UPDATE reaction_windows
+        SET status = 'open',
+            resolved_at = NULL
+        WHERE id = $1
+          AND status = 'queued'
+        RETURNING *
+    `, [next.id]);
+
+    return result.rows[0] ? mapReactionWindow(result.rows[0]) : null;
+}
+
+/**
+ * After one reactor finishes, either open the next queued window (by speed)
+ * or promote the batch lead to ready when everyone is done.
+ */
+async function progressReactionBatchAfterDecision(client, batchId, {
+    blocking = false,
+    resolution = null
+} = {}) {
+    const next = await openNextQueuedReactionInBatch(client, batchId);
+    if (next) {
+        const windows = await listReactionBatch(client, batchId);
+        return {
+            complete: false,
+            nextWindow: next,
+            resumeWindow: null,
+            windows
+        };
+    }
+    const finalized = await finalizeReactionBatchIfComplete(client, batchId, {
+        blocking,
+        resolution
+    });
+    return {
+        ...finalized,
+        nextWindow: null
+    };
+}
+
+/**
+ * When no open/queued windows remain in a batch, promote the lead blocking
+ * window to ready so the original skill can resume.
+ */
+async function finalizeReactionBatchIfComplete(client, batchId, {
+    blocking = false,
+    resolution = null
+} = {}) {
+    const windows = await listReactionBatch(client, batchId);
+    if (!windows.length) {
+        return { complete: true, resumeWindow: null, windows: [] };
+    }
+
+    const stillWaiting = windows.filter(item =>
+        item.status === 'open' || item.status === 'queued'
+    );
+    if (stillWaiting.length) {
+        return { complete: false, resumeWindow: null, windows };
+    }
+
+    const lead = windows.find(item => item.resumePayload) || windows[0];
+    const batchBlocking = blocking || windows.some(item => item.blocking);
+
+    if (batchBlocking && lead) {
+        const mergedResolution = {
+            ...(lead.resolution || {}),
+            ...(resolution || {})
+        };
+        const result = await client.query(`
+            UPDATE reaction_windows
+            SET status = 'ready',
+                resolution = $2::jsonb,
+                resolved_at = COALESCE(resolved_at, NOW())
+            WHERE id = $1
+            RETURNING *
+        `, [lead.id, JSON.stringify(mergedResolution)]);
+
+        const resumeWindow = mapReactionWindow(result.rows[0]);
+        const refreshed = await listReactionBatch(client, batchId);
+        return {
+            complete: true,
+            resumeWindow,
+            windows: refreshed.map(item =>
+                Number(item.id) === Number(resumeWindow.id) ? resumeWindow : item
+            )
+        };
+    }
+
+    return {
+        complete: true,
+        resumeWindow: null,
+        windows: await listReactionBatch(client, batchId)
+    };
+}
+
+async function listOpenReactionWindows(db = pool) {
     const result = await db.query(`
         SELECT *
         FROM reaction_windows
-        WHERE status IN ('open', 'ready')
-        ORDER BY id DESC
-        LIMIT 1
+        WHERE status IN ('open', 'ready', 'queued')
+        ORDER BY
+            COALESCE((context->>'batchOrder')::int, 9999) ASC,
+            id ASC
     `);
+    return result.rows.map(mapReactionWindow);
+}
 
-    return result.rows.length
-        ? mapReactionWindow(result.rows[0])
-        : null;
+async function getOpenReactionsState(actorId = null, db = pool) {
+    const windows = await listOpenReactionWindows(db);
+    const mineId = Number(actorId || 0);
+    const openWindows = windows.filter(item => item.status === 'open');
+    const queuedWindows = windows.filter(item => item.status === 'queued');
+    const mine = mineId
+        ? (openWindows.find(item => Number(item.reactorId) === mineId) || null)
+        : (openWindows[0] || null);
+
+    const peerWindows = [
+        ...openWindows.filter(item => !mine || Number(item.id) !== Number(mine.id)),
+        ...queuedWindows
+    ];
+
+    const peers = peerWindows.map(item => ({
+        id: item.id,
+        batchId: item.batchId,
+        reactorId: item.reactorId,
+        reactorName: item.reactorName || item.options?.[0]?.actorName || `角色#${item.reactorId}`,
+        reactorSpeed: item.reactorSpeed,
+        batchOrder: item.batchOrder,
+        triggerType: item.triggerType,
+        blocking: item.blocking,
+        optionCount: (item.options || []).length,
+        status: item.status
+    }));
+
+    const resume = windows.find(item =>
+        item.status === 'ready' && item.blocking && item.resumePayload
+    ) || null;
+
+    return {
+        windows,
+        mine,
+        peers,
+        resume,
+        batchId: mine?.batchId || peers[0]?.batchId || resume?.batchId || null
+    };
+}
+
+/** @deprecated Prefer getOpenReactionsState; kept for single-window call sites. */
+async function latestOpenReaction(db = pool) {
+    const state = await getOpenReactionsState(null, db);
+    return state.mine || state.resume || null;
+}
+
+function broadcastReactionWindows(windows = []) {
+    const list = (Array.isArray(windows) ? windows : [windows]).filter(Boolean);
+    if (!list.length) return;
+    io.emit('combat:reaction-batch', {
+        batchId: list[0].batchId || null,
+        windows: list
+    });
+    for (const window of list) {
+        io.emit('combat:reaction-opened', window);
+    }
+}
+
+function clearStackChatMessages(stackOrSnapshot) {
+    const frames = Array.isArray(stackOrSnapshot)
+        ? stackOrSnapshot
+        : stackOrSnapshot?.frames;
+    if (!Array.isArray(frames)) return stackOrSnapshot;
+    for (const frame of frames) {
+        if (frame?.context?.results) {
+            frame.context.results.messages = [];
+        }
+    }
+    return stackOrSnapshot;
+}
+
+function clearResumePayloadChatMessages(resumePayload) {
+    if (!resumePayload || typeof resumePayload !== 'object') return resumePayload;
+    if (!resumePayload.stack) return resumePayload;
+    return {
+        ...resumePayload,
+        stack: clearStackChatMessages({
+            ...resumePayload.stack,
+            frames: (resumePayload.stack.frames || []).map(frame => ({
+                ...frame,
+                context: frame.context
+                    ? {
+                        ...frame.context,
+                        results: {
+                            ...(frame.context.results || {}),
+                            messages: []
+                        }
+                    }
+                    : frame.context
+            }))
+        })
+    };
+}
+
+function asReactionWindowList(result) {
+    if (!result) return [];
+    return Array.isArray(result) ? result.filter(Boolean) : [result];
+}
+
+/**
+ * Parent-skill resume target must stay the attack/skill target unless the
+ * reaction explicitly redirected it. Option.targetId is often the heal/dispel
+ * subject and must not rewrite the resume payload.
+ */
+function buildReactionResolution(window, option, applied = {}) {
+    const resumeTargetId = Number(
+        window?.resumePayload?.targetId || 0
+    );
+    const explicitRedirect = Number(
+        applied?.resume?.targetId ||
+        option?.meta?.redirectTargetId ||
+        applied?.flags?.redirectTargetId ||
+        0
+    );
+    return {
+        targetId: explicitRedirect || resumeTargetId || null,
+        flags: { ...(applied?.flags || {}) }
+    };
 }
 
 async function expireNonBlockingReactions(client) {
@@ -3060,6 +3470,15 @@ async function expireNonBlockingReactions(client) {
     `);
 
     return result.rows.map(row => Number(row.id));
+}
+
+async function emitTimingHooks(client, timingCodes, baseContext = {}) {
+    return combat.emitGlobalTimings(
+        client,
+        timingCodes,
+        baseContext,
+        timingPipelineDeps()
+    );
 }
 
 async function addShieldValue(
@@ -3125,7 +3544,7 @@ async function appendPrognosisOptionIfAvailable(
     const option = reactionOption(character, skill, {
         targetId: healerId,
         targetName: character.name,
-        note: '剛造成恢復效果，可把 50% 實際治療量轉成護盾',
+        note: '',
         meta: {
             heals: heals.filter(item => Number(item.heal || 0) > 0)
         }
@@ -3139,7 +3558,7 @@ async function appendPrognosisOptionIfAvailable(
 }
 
 
-// ---------- 即時聊天室 / 戰鬥紀錄 ----------
+// ---------- 聊天室 / 戰鬥紀錄 ----------
 
 app.get('/api/chat/messages', async (req, res) => {
     const channel = req.query.channel === 'combat' ? 'combat' : 'team';
@@ -3175,7 +3594,7 @@ app.delete('/api/chat/messages', async (req, res) => {
         res.json({ success: true, channel });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: '清空聊天室失敗' });
+        res.status(500).json({ error: 'error' });
     }
 });
 
@@ -3183,11 +3602,11 @@ app.post('/api/chat/messages', async (req, res) => {
     const characterId = number(req.body.characterId);
     const content = String(req.body.content || '').trim().slice(0, 2000);
 
-    if (!content) return res.status(400).json({ error: '訊息不能是空白' });
+    if (!content) return res.status(400).json({ error: 'error' });
 
     try {
         const character = await getCharacterById(characterId);
-        if (!character) return res.status(404).json({ error: '找不到聊天角色' });
+        if (!character) return res.status(404).json({ error: 'error' });
 
         const message = await insertChatMessage(pool, {
             channel: 'team',
@@ -3201,7 +3620,7 @@ app.post('/api/chat/messages', async (req, res) => {
         res.json(message);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: '傳送訊息失敗' });
+        res.status(500).json({ error: 'error' });
     }
 });
 
@@ -3225,7 +3644,7 @@ app.get('/api/combat/logs', async (req, res) => {
         res.json(result.rows.map(mapBattleEvent));
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: '讀取戰場紀錄失敗' });
+        res.status(500).json({ error: 'error' });
     }
 });
 
@@ -3237,11 +3656,11 @@ app.delete('/api/combat/logs', async (_req, res) => {
         res.json({ success: true });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: '清空戰場紀錄失敗' });
+        res.status(500).json({ error: 'error' });
     }
 });
 
-// ---------- 基礎戰技 ----------
+// ---------- 角色 API ----------
 
 app.get('/api/combat/skills', async (req, res) => {
     const actorId = number(req.query.actorId);
@@ -3251,7 +3670,7 @@ app.get('/api/combat/skills', async (req, res) => {
         if (!actorId) return res.json(base);
 
         const actor = await getCharacterById(actorId);
-        if (!actor) return res.status(404).json({ error: '找不到行動角色' });
+        if (!actor) return res.status(404).json({ error: 'error' });
 
         const equipped = (actor.equippedSkills || [])
             .filter(skill => !isContextReactionSkill(skill))
@@ -3272,17 +3691,108 @@ app.get('/api/combat/state', async (_req, res) => {
         res.json(await getCombatState());
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: '讀取戰鬥順序失敗' });
+        res.status(500).json({ error: 'error' });
     }
 });
 
 
-app.get('/api/combat/reactions/open', async (_req, res) => {
+app.get('/api/combat/reactions/open', async (req, res) => {
     try {
-        res.json(await latestOpenReaction());
+        const actorId = number(req.query.actorId, 0) || null;
+        res.json(await getOpenReactionsState(actorId));
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: '讀取反應時點失敗' });
+        res.status(500).json({ error: 'error' });
+    }
+});
+
+app.patch('/api/characters/:id/reaction-default-skip', async (req, res) => {
+    const characterId = number(req.params.id);
+    const enabled = req.body?.enabled === true || req.body?.enabled === 'true';
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+        const result = await client.query(`
+            UPDATE characters
+            SET reaction_default_skip = $2
+            WHERE id = $1
+            RETURNING *
+        `, [characterId, enabled]);
+
+        if (!result.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'error' });
+        }
+
+        let skippedWindow = null;
+        let batchResult = null;
+        if (enabled) {
+            const open = await client.query(`
+                SELECT *
+                FROM reaction_windows
+                WHERE reactor_id = $1
+                  AND status = 'open'
+                ORDER BY id ASC
+                FOR UPDATE
+            `, [characterId]);
+
+            for (const row of open.rows) {
+                const window = mapReactionWindow(row);
+                await client.query(`
+                    UPDATE reaction_windows
+                    SET status = 'skipped',
+                        options = '[]'::jsonb,
+                        resolution = $2::jsonb,
+                        resolved_at = NOW()
+                    WHERE id = $1
+                `, [
+                    window.id,
+                    JSON.stringify({
+                        skipped: true,
+                        auto: true,
+                        reason: 'reaction_default_skip'
+                    })
+                ]);
+                if (window.batchId) {
+                    batchResult = await progressReactionBatchAfterDecision(client, window.batchId, {
+                        blocking: window.blocking
+                    });
+                }
+                skippedWindow = window;
+            }
+        }
+
+        await client.query('COMMIT');
+
+        const mapped = mapCharacter(result.rows[0]);
+        io.emit('characters:changed');
+        if (batchResult?.resumeWindow) {
+            io.emit('combat:reaction-updated', batchResult.resumeWindow);
+        } else if (skippedWindow) {
+            io.emit('combat:reaction-closed', { id: skippedWindow.id });
+            if (batchResult?.nextWindow) {
+                io.emit('combat:reaction-opened', batchResult.nextWindow);
+            }
+        }
+        if (batchResult?.windows?.length) {
+            broadcastReactionWindows(batchResult.windows);
+        }
+
+        res.json({
+            success: true,
+            character: mapped,
+            resume: batchResult?.resumeWindow || null,
+            nextWindow: batchResult?.nextWindow || null
+        });
+    } catch (error) {
+        try {
+            await client.query('ROLLBACK');
+        } catch {}
+        console.error(error);
+        res.status(500).json({ error: error.message || '更新反應預設失敗' });
+    } finally {
+        client.release();
     }
 });
 
@@ -3305,7 +3815,7 @@ app.post('/api/combat/reactions/:id/respond', async (req, res) => {
 
         if (!reactionResult.rows.length) {
             await client.query('ROLLBACK');
-            return res.status(409).json({ error: '這個反應時點已經結束' });
+            return res.status(409).json({ error: 'error' });
         }
 
         const row = reactionResult.rows[0];
@@ -3316,7 +3826,44 @@ app.post('/api/combat/reactions/:id/respond', async (req, res) => {
         };
 
         if (action === 'skip') {
-            if (window.blocking) {
+            await client.query(`
+                UPDATE reaction_windows
+                SET status = 'skipped',
+                    options = '[]'::jsonb,
+                    resolution = $2::jsonb,
+                    resolved_at = NOW()
+                WHERE id = $1
+            `, [
+                reactionId,
+                JSON.stringify({
+                    skipped: true,
+                    targetId: window.resumePayload?.targetId
+                })
+            ]);
+
+            const batchResult = window.batchId
+                ? await progressReactionBatchAfterDecision(client, window.batchId, {
+                    blocking: window.blocking
+                })
+                : {
+                    complete: true,
+                    resumeWindow: window.blocking
+                        ? mapReactionWindow({
+                            ...row,
+                            status: 'ready',
+                            options: [],
+                            resolution: {
+                                targetId: window.resumePayload?.targetId,
+                                flags: {}
+                            }
+                        })
+                        : null,
+                    windows: [],
+                    nextWindow: null
+                };
+
+            // Legacy single-window without batch: blocking skip ??ready.
+            if (!window.batchId && window.blocking) {
                 await client.query(`
                     UPDATE reaction_windows
                     SET status = 'ready',
@@ -3330,45 +3877,83 @@ app.post('/api/combat/reactions/:id/respond', async (req, res) => {
                         flags: {}
                     })
                 ]);
-            } else {
-                await client.query(`
-                    UPDATE reaction_windows
-                    SET status = 'skipped',
-                        resolved_at = NOW()
-                    WHERE id = $1
-                `, [reactionId]);
+                const updated = await client.query(
+                    'SELECT * FROM reaction_windows WHERE id = $1',
+                    [reactionId]
+                );
+                batchResult.resumeWindow = mapReactionWindow(updated.rows[0]);
+                batchResult.windows = [batchResult.resumeWindow];
             }
 
             await client.query('COMMIT');
 
-            const updated = await pool.query(
-                'SELECT * FROM reaction_windows WHERE id = $1',
-                [reactionId]
+            const peers = await getOpenReactionsState(
+                window.reactorId,
+                pool
             );
-            const mapped = mapReactionWindow(updated.rows[0]);
 
-            io.emit(
-                window.blocking ? 'combat:reaction-updated' : 'combat:reaction-closed',
-                window.blocking ? mapped : { id: reactionId }
-            );
+            if (batchResult.resumeWindow) {
+                io.emit('combat:reaction-updated', batchResult.resumeWindow);
+            } else {
+                io.emit('combat:reaction-closed', { id: reactionId });
+                if (batchResult.nextWindow) {
+                    io.emit('combat:reaction-opened', batchResult.nextWindow);
+                }
+                if (batchResult.windows?.length) {
+                    broadcastReactionWindows(
+                        batchResult.windows.filter(item =>
+                            item.status === 'open' || item.status === 'queued'
+                        )
+                    );
+                }
+            }
+            io.emit('combat:reaction-batch', {
+                batchId: window.batchId,
+                windows: peers.windows
+            });
 
             return res.json({
                 success: true,
-                window: mapped,
-                resume: window.blocking
+                window: batchResult.resumeWindow ||
+                    batchResult.nextWindow ||
+                    mapReactionWindow({ ...row, status: 'skipped', options: [] }),
+                resume: Boolean(batchResult.resumeWindow),
+                peers: peers.peers,
+                batchComplete: batchResult.complete
             });
         }
 
         const option = window.options.find(item => item.id === optionId);
         if (!option) {
             await client.query('ROLLBACK');
-            return res.status(400).json({ error: '找不到這個反應戰技' });
+        return res.status(400).json({ error: '找不到這個反應戰技' });
         }
 
-        const reactionSkill = ALL_EQUIPPABLE_SKILLS.get(option.skillKey);
+        // Merge client pick meta (SP / cell / redirect / choice).
+        const clientMeta = req.body.meta && typeof req.body.meta === 'object'
+            ? req.body.meta
+            : {};
+        if (req.body.targetId) {
+            option.targetId = number(req.body.targetId);
+        }
+        option.meta = {
+            ...(option.meta || {}),
+            ...clientMeta
+        };
+        if (clientMeta.redirectTargetId) {
+            option.targetId = Number(clientMeta.redirectTargetId);
+        }
+        if (clientMeta.pickedTargetId && !option.targetId) {
+            option.targetId = Number(clientMeta.pickedTargetId);
+        }
+
+        const reactionSkill =
+            ALL_EQUIPPABLE_SKILLS.get(option.skillKey) ||
+            SKILL_CATALOG[option.skillKey] ||
+            null;
         if (!reactionSkill) {
             await client.query('ROLLBACK');
-            return res.status(400).json({ error: '反應戰技資料不存在' });
+            return res.status(400).json({ error: 'error' });
         }
 
         if (!(await actorHasSkill(client, option.actorId, option.skillKey))) {
@@ -3384,433 +3969,326 @@ app.post('/api/combat/reactions/:id/respond', async (req, res) => {
 
         if (!reactor || Number(reactor.hp) <= 0) {
             await client.query('ROLLBACK');
-            return res.status(400).json({ error: '反應角色目前無法行動' });
+            return res.status(400).json({ error: `${reactor?.name || '這個角色'} 已擊倒，無法發動反應` });
         }
 
         const cost = await spendSkillCost(client, reactor, reactionSkill);
+
         let reactionText = '';
+
         let charactersChanged = cost.amount > 0;
+
         let battlefieldChanged = false;
+
         let nextOptions = window.options.filter(item => item.id !== option.id);
 
-        if (window.triggerType === 'attack_declared') {
-            const resume = {
-                ...(window.resumePayload || {})
-            };
-            const flags = {
-                ...(window.resolution?.flags || {})
-            };
 
-            const originalTargetId =
-                Number(window.context?.targetId || resume.targetId);
 
-            switch (reactionSkill.name) {
-                case '守護':
-                    resume.targetId = Number(reactor.id);
-                    await applyBuffToCharacters(
-                        client,
-                        [reactor.id],
-                        'guard_ready',
-                        {
-                            sourceSkillKey: reactionSkill.key,
-                            sourceCharacterId: reactor.id
-                        }
-                    );
-                    charactersChanged = true;
-                    reactionText =
-                        `${reactor.name} 發動「守護」，代替目標承受攻擊並進行格擋。`;
-                    break;
+        const effectId =
 
-                case '奉獻':
-                    resume.targetId = Number(reactor.id);
-                    flags.ignoreDefenseTargetId = Number(reactor.id);
+            option.effectId ||
 
-                    // 戰技本身消耗 1SP，效果再讓自己 SP+1。
-                    await client.query(`
-                        UPDATE characters
-                        SET sp = LEAST(max_sp, sp + 1)
-                        WHERE id = $1
-                    `, [reactor.id]);
-                    charactersChanged = true;
-                    reactionText =
-                        `${reactor.name} 發動「奉獻」，代為承受攻擊；` +
-                        `本次自身防禦與魔抗視為 0，並 SP+1。`;
-                    break;
+            option.meta?.effectId ||
 
-                case '快速移位':
-                    await swapCharacterPositions(
-                        client,
-                        reactor.id,
-                        originalTargetId
-                    );
-                    resume.targetId = Number(reactor.id);
-                    battlefieldChanged = true;
-                    reactionText =
-                        `${reactor.name} 發動「快速移位」，與原目標交換位置並代受本次攻擊。`;
-                    break;
+            combat.getReactionDef(reactionSkill)?.effectId ||
 
-                case '障壁':
-                    await applyBuffToCharacters(
-                        client,
-                        [originalTargetId],
-                        'barrier',
-                        {
-                            sourceSkillKey: reactionSkill.key,
-                            sourceCharacterId: reactor.id
-                        }
-                    );
-                    charactersChanged = true;
-                    reactionText =
-                        `${reactor.name} 發動「障壁」，使原目標下一次受到的傷害 -25%。`;
-                    break;
+            reactionSkill.key ||
 
-                case '偏斜':
-                    await applyBuffToCharacters(
-                        client,
-                        [originalTargetId],
-                        'guard_ready',
-                        {
-                            sourceSkillKey: reactionSkill.key,
-                            sourceCharacterId: reactor.id
-                        }
-                    );
-                    await applyDebuffBundle(
-                        client,
-                        [window.sourceActorId],
-                        ['damage_taken_up_25'],
-                        {
-                            sourceSkillKey: reactionSkill.key,
-                            sourceCharacterId: reactor.id,
-                            currentRound: clock.round
-                        }
-                    );
-                    charactersChanged = true;
-                    reactionText =
-                        `${reactor.name} 發動「偏斜」：本次攻擊進行格擋，攻擊者獲得【易傷】。`;
-                    break;
+            option.skillKey ||
 
-                case '撥擋':
-                    flags.negateOneSegmentTargetId = originalTargetId;
-                    await client.query(`
-                        UPDATE characters
-                        SET ap = LEAST(max_ap, ap + 1)
-                        WHERE id = $1
-                    `, [reactor.id]);
-                    charactersChanged = true;
-                    reactionText =
-                        `${reactor.name} 發動「撥擋」：本次攻擊其中一段傷害無效，AP+1。`;
-                    break;
+            null;
 
-                case '箭擊掩護':
-                    flags.negateAllDamageTargetId = originalTargetId;
-                    reactionText =
-                        `${reactor.name} 發動「箭擊掩護」：原目標本次遠程物理攻擊傷害無效。`;
-                    break;
 
-                case '重擊聲援':
-                    flags.critFlat = Number(flags.critFlat || 0) + 50;
-                    reactionText =
-                        `${reactor.name} 發動「重擊聲援」：本次攻擊暴擊率 +50%。`;
-                    break;
 
-                case '破陣':
-                    flags.unblockable = true;
-                    flags.applyBlockSealOnHit = true;
-                    reactionText =
-                        `${reactor.name} 發動「破陣」：本次攻擊無法格擋，命中時施加【格擋封印】。`;
-                    break;
+        if (!reactionSkill?.key && !option.skillKey) {
 
-                case '精準打擊':
-                    flags.critDamageBonus = Number(flags.critDamageBonus || 0) + 50;
-                    reactionText =
-                        `${reactor.name} 發動「精準打擊」：本次攻擊暴擊傷害 +50%。`;
-                    break;
+            await client.query('ROLLBACK');
 
-                case '鋒銳':
-                    flags.applyBleedOnHit = true;
-                    reactionText =
-                        `${reactor.name} 發動「鋒銳」：本次攻擊命中時施加【流血】。`;
-                    break;
+            return res.status(400).json({ error: 'error' });
 
-                case '獵鷹之眼':
-                    flags.cannotEvade = true;
-                    reactionText =
-                        `${reactor.name} 發動「獵鷹之眼」：本次遠程攻擊【無法迴避】。`;
-                    break;
-
-                case '光導':
-                    flags.cannotEvade = true;
-                    flags.cannotCrit = true;
-                    reactionText =
-                        `${reactor.name} 發動「光導」：本次攻擊【無法迴避】、【無法暴擊】。`;
-                    break;
-
-                default:
-                    await client.query('ROLLBACK');
-                    return res.status(400).json({ error: '這個攻擊反應尚未建立自動效果' });
-            }
-
-            await client.query(`
-                UPDATE reaction_windows
-                SET status = 'ready',
-                    resolution = $2::jsonb,
-                    resolved_at = NOW()
-                WHERE id = $1
-            `, [
-                reactionId,
-                JSON.stringify({
-                    targetId: resume.targetId,
-                    flags
-                })
-            ]);
-        } else {
-            switch (reactionSkill.name) {
-                case '快速治療': {
-                    const targetId = Number(option.targetId);
-                    const effectiveMagic = await sourceEffectiveMagic(
-                        client,
-                        reactor.id
-                    );
-                    const requestedHeal = Math.max(
-                        1,
-                        Math.floor(effectiveMagic * 0.75)
-                    );
-
-                    const targetResult = await client.query(
-                        'SELECT * FROM characters WHERE id = $1 FOR UPDATE',
-                        [targetId]
-                    );
-                    const target = targetResult.rows[0];
-
-                    if (!target) {
-                        throw new Error('快速治療的目標已不存在');
-                    }
-
-                    const oldHp = Number(target.hp);
-                    const newHp = Math.min(
-                        Number(target.max_hp),
-                        oldHp + requestedHeal
-                    );
-                    const actualHeal = Math.max(0, newHp - oldHp);
-
-                    if (actualHeal > 0) {
-                        await client.query(
-                            'UPDATE characters SET hp = $1 WHERE id = $2',
-                            [newHp, targetId]
-                        );
-                        charactersChanged = true;
-                    }
-
-                    nextOptions = await appendPrognosisOptionIfAvailable(
-                        client,
-                        nextOptions,
-                        reactor.id,
-                        [{
-                            targetId,
-                            targetName: target.name,
-                            heal: actualHeal,
-                            oldHp,
-                            newHp
-                        }]
-                    );
-
-                    reactionText =
-                        `${reactor.name} 發動「快速治療」→ ${target.name}：` +
-                        `HP ${oldHp} → ${newHp}` +
-                        (actualHeal ? `（+${actualHeal}）` : '（未產生有效恢復）');
-                    break;
-                }
-
-                case '預後': {
-                    const heals = Array.isArray(option.meta?.heals)
-                        ? option.meta.heals
-                        : [];
-                    const shieldLines = [];
-
-                    for (const heal of heals) {
-                        const shieldGain = Math.floor(
-                            Number(heal.heal || 0) * 0.5
-                        );
-                        if (shieldGain <= 0) continue;
-
-                        const totalShield = await addShieldValue(
-                            client,
-                            heal.targetId,
-                            shieldGain,
-                            reactionSkill.key,
-                            reactor.id
-                        );
-
-                        shieldLines.push(
-                            `${heal.targetName || `#${heal.targetId}`} +${shieldGain} 護盾（目前 ${totalShield}）`
-                        );
-                    }
-
-                    charactersChanged = shieldLines.length > 0 || charactersChanged;
-                    reactionText =
-                        `${reactor.name} 發動「預後」：` +
-                        (
-                            shieldLines.length
-                                ? shieldLines.join('；')
-                                : '本次沒有可轉換的實際治療量'
-                        );
-                    break;
-                }
-
-                case '重燃': {
-                    const targetId = Number(option.targetId);
-                    const targetResult = await client.query(
-                        'SELECT name, sp, max_sp FROM characters WHERE id = $1 FOR UPDATE',
-                        [targetId]
-                    );
-                    const target = targetResult.rows[0];
-                    if (!target) throw new Error('重燃目標已不存在');
-
-                    const oldSp = Number(target.sp);
-                    const newSp = Math.min(
-                        Number(target.max_sp),
-                        oldSp + 1
-                    );
-
-                    await client.query(
-                        'UPDATE characters SET sp = $1 WHERE id = $2',
-                        [newSp, targetId]
-                    );
-                    charactersChanged = true;
-
-                    reactionText =
-                        `${reactor.name} 發動「重燃」→ ${target.name}：SP ${oldSp} → ${newSp}。`;
-                    break;
-                }
-
-                case '堅守':
-                    await applyBuffToCharacters(
-                        client,
-                        [reactor.id],
-                        'steadfast',
-                        {
-                            sourceSkillKey: reactionSkill.key,
-                            sourceCharacterId: reactor.id,
-                            expiresRound: clock.round
-                        }
-                    );
-                    charactersChanged = true;
-                    reactionText =
-                        `${reactor.name} 發動「堅守」：本輪防禦 +25%、格擋率 +25%（可疊加）。`;
-                    break;
-
-                case '震怒':
-                    await applyBuffToCharacters(
-                        client,
-                        [reactor.id],
-                        'rage',
-                        {
-                            sourceSkillKey: reactionSkill.key,
-                            sourceCharacterId: reactor.id,
-                            expiresRound: clock.round
-                        }
-                    );
-                    charactersChanged = true;
-                    reactionText =
-                        `${reactor.name} 發動「震怒」：本輪造成傷害 +25%、命中 +25（可疊加）。`;
-                    break;
-
-                case '沉重反擊': {
-                    const targetId = Number(option.targetId);
-                    const attackerResult = await client.query(
-                        'SELECT * FROM characters WHERE id = $1 FOR UPDATE',
-                        [targetId]
-                    );
-                    const attacker = attackerResult.rows[0];
-                    if (!attacker) throw new Error('反擊目標已不存在');
-
-                    const reactorBuffs = await getCharacterBuffEntries(
-                        client,
-                        reactor.id
-                    );
-                    const reactorMods = buffModifiers(reactorBuffs);
-                    const attackerBuffs = await getCharacterBuffEntries(
-                        client,
-                        attacker.id
-                    );
-                    const attackerMods = buffModifiers(attackerBuffs);
-
-                    const attackValue = Math.floor(
-                        Number(reactor.patk) * reactorMods.patkMult
-                    );
-                    const defenseValue = Math.floor(
-                        Number(attacker.defense) * attackerMods.defenseMult
-                    );
-                    const damage = Math.max(
-                        1,
-                        Math.floor(attackValue * 0.5 - defenseValue)
-                    );
-                    const result = await applyDirectHpLoss(
-                        client,
-                        attacker.id,
-                        damage
-                    );
-                    charactersChanged = result.loss > 0 || charactersChanged;
-
-                    reactionText =
-                        `${reactor.name} 發動「沉重反擊」→ ${attacker.name}：損失 ${result.loss} HP。`;
-                    break;
-                }
-
-                case '城墻反擊': {
-                    const targetId = Number(option.targetId);
-                    const attackerResult = await client.query(
-                        'SELECT * FROM characters WHERE id = $1 FOR UPDATE',
-                        [targetId]
-                    );
-                    const attacker = attackerResult.rows[0];
-                    if (!attacker) throw new Error('城墻反擊目標已不存在');
-
-                    const reactorBuffs = await getCharacterBuffEntries(
-                        client,
-                        reactor.id
-                    );
-                    const reactorMods = buffModifiers(reactorBuffs);
-                    const defense = Math.floor(
-                        Number(reactor.defense) *
-                        reactorMods.defenseMult
-                    );
-
-                    const result = await applyDirectHpLoss(
-                        client,
-                        attacker.id,
-                        defense
-                    );
-                    charactersChanged = result.loss > 0 || charactersChanged;
-
-                    reactionText =
-                        `${reactor.name} 發動「城墻反擊」→ ${attacker.name}：` +
-                        `依有效防禦使其損失 ${result.loss} HP。`;
-                    break;
-                }
-
-                default:
-                    await client.query('ROLLBACK');
-                    return res.status(400).json({ error: '這個後續反應尚未建立自動效果' });
-            }
-
-            const nextStatus =
-                nextOptions.length > 0
-                    ? 'open'
-                    : 'resolved';
-
-            await client.query(`
-                UPDATE reaction_windows
-                SET options = $2::jsonb,
-                    status = $3,
-                    resolved_at = CASE WHEN $3 = 'resolved' THEN NOW() ELSE resolved_at END
-                WHERE id = $1
-            `, [
-                reactionId,
-                JSON.stringify(nextOptions),
-                nextStatus
-            ]);
         }
+
+
+
+        const resume = { ...(window.resumePayload || {}) };
+
+        const flags = { ...(window.resolution?.flags || {}) };
+
+        const timingCode = combat.normalizeTimingCode(window.triggerType);
+
+
+
+        try {
+
+            const applied = await combat.applyReactionEffect({
+
+                effectId: effectId || reactionSkill.key,
+
+                client,
+
+                reactor,
+
+                skill: reactionSkill,
+
+                option,
+
+                window,
+
+                clock,
+
+                resume,
+
+                flags,
+
+                nextOptions,
+
+                deps: {
+
+                    applyBuffToCharacters,
+
+                    applyDebuffBundle,
+
+                    swapCharacterPositions,
+
+                    addShieldValue,
+
+                    sourceEffectiveMagic,
+
+                    getCharacterBuffEntries,
+
+                    buffModifiers,
+                    BUFF_CATALOG,
+                    appendPrognosisOptionIfAvailable,
+                    removeBuffKeys,
+                    resolveRecipients: async (c, { actor, skill, target, context }) => {
+                        const tid = Number(
+                            target?.id ||
+                            context?.targetId ||
+                            (Array.isArray(context?.targetIds) && context.targetIds[0]) ||
+                            0
+                        );
+                        let targetRow = null;
+                        if (tid) {
+                            const row = await c.query(
+                                'SELECT * FROM characters WHERE id = $1',
+                                [tid]
+                            );
+                            targetRow = row.rows[0] || { id: tid };
+                        }
+                        return autoRecipientIds(
+                            c,
+                            actor,
+                            targetRow || actor,
+                            skill
+                        );
+                    },
+                    resolveFollowUpAttack: async (args) =>
+                        resolveFollowUpAttack(client, args),
+                    applyReturnReroll: async (args) =>
+                        applyReturnReroll(client, args),
+
+                    resolveCounterDamage: async ({
+
+                        client: c,
+
+                        reactor: r,
+
+                        option: opt,
+
+                        effectId: eid
+
+                    }) => {
+
+                        const targetId = Number(opt.targetId);
+
+                        const attackerResult = await c.query(
+
+                            'SELECT * FROM characters WHERE id = $1 FOR UPDATE',
+
+                            [targetId]
+
+                        );
+
+                        const attacker = attackerResult.rows[0];
+
+                        if (!attacker) throw new Error('反擊目標已不存在');
+
+
+
+                        const reactorBuffs = await getCharacterBuffEntries(c, r.id);
+
+                        const reactorMods = buffModifiers(reactorBuffs);
+
+
+
+                        let damageAmount;
+
+                        if (eid === 'WALL_COUNTER') {
+
+                            damageAmount = Math.floor(
+
+                                Number(r.defense) * reactorMods.defenseMult
+
+                            );
+
+                        } else {
+
+                            const attackerBuffs = await getCharacterBuffEntries(
+
+                                c,
+
+                                attacker.id
+
+                            );
+
+                            const attackerMods = buffModifiers(attackerBuffs);
+
+                            const attackValue = Math.floor(
+
+                                Number(r.patk) * reactorMods.patkMult
+
+                            );
+
+                            const defenseValue = Math.floor(
+
+                                Number(attacker.defense) * attackerMods.defenseMult
+
+                            );
+
+                            damageAmount = Math.max(
+
+                                1,
+
+                                Math.floor(attackValue * 0.5 - defenseValue)
+
+                            );
+
+                        }
+
+
+
+                        const result = await applyDirectHpLoss(
+
+                            c,
+
+                            attacker.id,
+
+                            damageAmount
+
+                        );
+
+
+
+                        return {
+
+                            reactionText: eid === 'WALL_COUNTER'
+
+                                ? `${r.name} 發動「城墻反擊」→ ${attacker.name}：依有效防禦使其損失 ${result.loss} HP。`
+
+                                : `${r.name} 發動「城牆反擊」→ ${attacker.name}：造成 ${result.loss} HP。`,
+
+                            charactersChanged: result.loss > 0
+
+                        };
+
+                    }
+
+                }
+
+            });
+
+
+
+            reactionText = applied.reactionText;
+
+            charactersChanged = charactersChanged || applied.charactersChanged;
+
+            battlefieldChanged = applied.battlefieldChanged;
+
+            nextOptions = applied.nextOptions;
+
+
+
+            // Same timing may list options from multiple reactors (and chained
+            // options like 基礎格擋). Keep THIS character's window open until their
+            // list is empty; only finalize the batch when every reactor is done.
+            let resumeWindow = null;
+            let batchWindows = null;
+
+            if (nextOptions.length > 0) {
+                await client.query(`
+                    UPDATE reaction_windows
+                    SET options = $2::jsonb,
+                        status = 'open',
+                        resolution = $3::jsonb
+                    WHERE id = $1
+                `, [
+                    reactionId,
+                    JSON.stringify(nextOptions),
+                    JSON.stringify(buildReactionResolution(window, option, applied))
+                ]);
+            } else {
+                await client.query(`
+                    UPDATE reaction_windows
+                    SET options = '[]'::jsonb,
+                        status = 'resolved',
+                        resolution = $2::jsonb,
+                        resolved_at = NOW()
+                    WHERE id = $1
+                `, [
+                    reactionId,
+                    JSON.stringify(buildReactionResolution(window, option, applied))
+                ]);
+
+                if (window.batchId) {
+                    const batchResult = await progressReactionBatchAfterDecision(
+                        client,
+                        window.batchId,
+                        {
+                            blocking: window.blocking || applied.blockingReady,
+                            resolution: buildReactionResolution(window, option, applied)
+                        }
+                    );
+                    resumeWindow = batchResult.resumeWindow;
+                    batchWindows = batchResult.windows;
+                    window.__nextWindow = batchResult.nextWindow || null;
+                } else if (
+                    window.blocking ||
+                    applied.blockingReady ||
+                    timingCode === combat.TIMING.ON_TARGET_DECLARED
+                ) {
+                    const result = await client.query(`
+                        UPDATE reaction_windows
+                        SET status = 'ready',
+                            resolved_at = NOW()
+                        WHERE id = $1
+                        RETURNING *
+                    `, [reactionId]);
+                    resumeWindow = mapReactionWindow(result.rows[0]);
+                }
+            }
+
+            // Stash for response after commit
+            window.__resumeWindow = resumeWindow;
+            window.__batchWindows = batchWindows;
+            window.__keptOpen = nextOptions.length > 0;
+
+        } catch (effectError) {
+
+            await client.query('ROLLBACK');
+
+            return res.status(400).json({
+
+                error: effectError.message || '反應效果失敗'
+
+            });
+
+        }
+
+
+
+        // Reaction resolution is entirely skill.pipeline (no nested double-cast).
+        const nestedWindows = [];
 
         const reactionMessage = await insertChatMessage(client, {
             channel: 'combat',
@@ -3818,7 +4296,7 @@ app.post('/api/combat/reactions/:id/respond', async (req, res) => {
             characterId: reactor.id,
             characterName: reactor.name,
             characterKind: reactor.kind || 'player',
-            content: `↯ ${reactionText}`,
+            content: `??${reactionText}`,
             payload: {
                 reactionWindowId: reactionId,
                 skillKey: reactionSkill.key,
@@ -3847,6 +4325,9 @@ app.post('/api/combat/reactions/:id/respond', async (req, res) => {
             [reactionId]
         );
         const updatedWindow = mapReactionWindow(updatedResult.rows[0]);
+        const resumeWindow = window.__resumeWindow || null;
+        const nextWindow = window.__nextWindow || null;
+        const peersState = await getOpenReactionsState(window.reactorId, pool);
 
         io.emit('chat:message', reactionMessage);
         io.emit('battle:event', reactionEvent);
@@ -3859,22 +4340,36 @@ app.post('/api/combat/reactions/:id/respond', async (req, res) => {
             });
         }
 
-        if (
-            updatedWindow.status === 'open' ||
-            updatedWindow.status === 'ready'
-        ) {
+        if (resumeWindow) {
+            io.emit('combat:reaction-updated', resumeWindow);
+        } else if (updatedWindow.status === 'open') {
             io.emit('combat:reaction-updated', updatedWindow);
         } else {
             io.emit('combat:reaction-closed', {
                 id: reactionId
             });
+            if (nextWindow) {
+                io.emit('combat:reaction-opened', nextWindow);
+            }
+        }
+
+        io.emit('combat:reaction-batch', {
+            batchId: window.batchId,
+            windows: peersState.windows
+        });
+
+        for (const nestedWindow of nestedWindows) {
+            const nestedList = asReactionWindowList(nestedWindow);
+            broadcastReactionWindows(nestedList);
         }
 
         return res.json({
             success: true,
             message: reactionMessage,
-            window: updatedWindow,
-            resume: updatedWindow.status === 'ready'
+            window: resumeWindow || nextWindow || updatedWindow,
+            resume: Boolean(resumeWindow),
+            peers: peersState.peers,
+            nestedWindows
         });
     } catch (error) {
         try {
@@ -3890,6 +4385,2032 @@ app.post('/api/combat/reactions/:id/respond', async (req, res) => {
     }
 });
 
+
+function buildTimingEngineDeps(client, bag) {
+    const state = {
+        content: '',
+        payload: bag.payload || {},
+        charactersChanged: false,
+        battlefieldChanged: false,
+        initiativeChanged: false,
+        costSpent: false,
+        /** Broadcasts queued by action bodies, flushed by the route after COMMIT. */
+        domainEvents: []
+    };
+
+    /**
+     * Fold an action-body result into the shared state. Unlike Object.assign
+     * this accumulates domainEvents, so a skill running several bodies does not
+     * lose the broadcasts queued by the earlier ones.
+     */
+    const mergeBodyResult = (result) => {
+        const { domainEvents, ...rest } = result || {};
+        Object.assign(state, rest);
+        if (Array.isArray(domainEvents) && domainEvents.length) {
+            state.domainEvents.push(...domainEvents);
+        }
+        return result;
+    };
+
+    const skillByKey = (key) =>
+        SKILL_CATALOG[key] || ALL_EQUIPPABLE_SKILLS.get(key) || null;
+
+    const result = {
+        state,
+        skillByKey,
+        loadEquippedRows: (c) => equippedSkillRows(c),
+        loadBuffEntriesMap: async (c, context) => {
+            const ids = [
+                Number(context.actorId || 0),
+                ...((context.affectedIds || []).map(Number)),
+                ...((context.targetIds || []).map(Number))
+            ].filter(Boolean);
+            const map = new Map();
+            for (const id of [...new Set(ids)]) {
+                map.set(id, await getCharacterBuffEntries(c, id));
+            }
+            return map;
+        },
+        createReactionWindow: (c, payload) => createReactionWindow(c, payload),
+        applyStatusMonitor: async (c, { option, context }) => {
+            const tick = combat.statusTickByEffectId(option.effectId);
+            if (!tick) return null;
+
+            const actorId = Number(option.actorId);
+            const entry = option.meta?.buffEntry;
+            const sourceMagic = await sourceEffectiveMagic(
+                c,
+                entry?.source_character_id
+            );
+            const baseAmount = combat.tickAmountFromEntry(entry, { sourceMagic });
+
+            if (tick.kind === 'heal') {
+                const row = await c.query(
+                    'SELECT hp, max_hp, name FROM characters WHERE id = $1 FOR UPDATE',
+                    [actorId]
+                );
+                if (!row.rows.length) return null;
+
+                const oldHp = Number(row.rows[0].hp);
+                const newHp = Math.min(Number(row.rows[0].max_hp), oldHp + baseAmount);
+                const actual = Math.max(0, newHp - oldHp);
+                if (actual > 0) {
+                    await c.query('UPDATE characters SET hp = $1 WHERE id = $2', [newHp, actorId]);
+                    state.charactersChanged = true;
+                }
+
+                return {
+                    heals: [{
+                        targetId: actorId,
+                        targetName: row.rows[0].name,
+                        heal: actual,
+                        oldHp,
+                        newHp
+                    }],
+                    affectedIds: [actorId],
+                    // Only open ON_HEAL when HP actually recovered.
+                    cascadeTiming: actual > 0 ? combat.TIMING.ON_HEAL : null,
+                    events: [{
+                        type: 'status',
+                        message: actual > 0
+                            ? `${tick.label}：${row.rows[0].name} 恢復 ${actual} HP`
+                            : `${tick.label}：${row.rows[0].name} HP 已滿`
+                    }]
+                };
+            }
+
+                // 見縫插針 lets the applier crit on their damage-over-time ticks.
+            const snapshot = entry?.source_snapshot || entry?.sourceSnapshot || {};
+            let amount = baseAmount;
+            let critText = '';
+            if (snapshot.hasNeedle) {
+                const roll = combat.rollStatusCrit({
+                    critRate: snapshot.crit,
+                    critDamageBonus: snapshot.critDamageBonus
+                });
+                if (roll.crit) {
+                    amount = Math.max(1, Math.floor(amount * roll.multiplier));
+                    critText = '（見縫插針暴擊）';
+                }
+            }
+
+            const result = await applyDirectHpLoss(c, actorId, amount);
+            if (result.loss > 0) state.charactersChanged = true;
+
+            return {
+                damages: [{ targetId: actorId, hpLoss: result.loss }],
+                affectedIds: [actorId],
+                events: [{
+                    type: 'status',
+                    message: `${tick.label}：損失 ${result.loss} HP${critText}`
+                }]
+            };
+        },
+        host: {
+            spendSkillCost: async (c, context, skill) => {
+                if (state.costSpent || bag.costAlreadySpent) {
+                    state.costSpent = true;
+                    return bag.cost;
+                }
+                const actorRow = context.meta?.actorRow || bag.actor;
+                const spent = await spendSkillCost(c, actorRow, skill);
+                state.costSpent = true;
+                state.cost = spent;
+                context.cost = spent;
+                context.flags.costSpent = true;
+                bag.cost = spent;
+                return spent;
+            },
+            /**
+             * Expand UI anchor + direction into every designated character id
+             * before ON_TARGET_DECLARED, so each is「被指定」.
+             */
+            resolveDesignatedTargets: async (c, args) => {
+                const skill = args.skill || args.context?.meta?.skill || bag.skill;
+                const actor = args.actor || bag.actor;
+                const target = args.target || bag.target || actor;
+                const direction = args.direction ||
+                    args.context?.direction ||
+                    bag.requestedDirection ||
+                    null;
+                const context = args.context || {};
+                if (!skill || !actor) {
+                    return (context.targetIds || []).map(Number).filter(Boolean);
+                }
+
+                const code = skill.targetCode || 'SELF';
+                let ids;
+                if (
+                    skill.actionCode === 'ATTACK' ||
+                    code === 'ANY_ORTHOGONAL' ||
+                    code === 'ALL_ENEMIES' ||
+                    code === 'ENEMY_ROW' ||
+                    skill.targetShape
+                ) {
+                    ids = await resolveAttackTargetIds(
+                        c,
+                        actor,
+                        target || actor,
+                        skill,
+                        direction
+                    );
+                } else if (
+                    ['HEAL', 'BUFF', 'DEBUFF', 'GUARD', 'UTILITY'].includes(skill.actionCode) ||
+                    ['ALL_ALLIES', 'ALLY_ROW', 'ALL_ENEMIES', 'ENEMY_ROW'].includes(code)
+                ) {
+                    ids = await autoRecipientIds(c, actor, target || actor, skill);
+                } else {
+                    const fallback = Number(target?.id || context.targetId || actor.id || 0);
+                    ids = fallback ? [fallback] : [];
+                }
+
+                ids = [...new Set((ids || []).map(Number).filter(Boolean))];
+                if (ids.length) {
+                    const rows = await c.query(
+                        'SELECT id, name, kind, hp FROM characters WHERE id = ANY($1::int[])',
+                        [ids]
+                    );
+                    context.meta = context.meta || {};
+                    context.meta.charactersById = context.meta.charactersById || new Map();
+                    for (const row of rows.rows) {
+                        context.meta.charactersById.set(Number(row.id), {
+                            id: Number(row.id),
+                            name: row.name,
+                            kind: row.kind || 'player',
+                            hp: Number(row.hp)
+                        });
+                    }
+                }
+                return ids;
+            },
+            resolveAttackHits: async (c, args) => {
+                const context = args.context || {};
+                const ctxTargetId = Number(
+                    primaryTargetId(context) || context.targetId || 0
+                );
+                let attackBag = bag;
+                if (
+                    ctxTargetId &&
+                    Number(ctxTargetId) !== Number(bag.targetId)
+                ) {
+                    const row = await c.query(
+                        'SELECT * FROM characters WHERE id = $1 FOR UPDATE',
+                        [ctxTargetId]
+                    );
+                    if (row.rows[0]) {
+                        attackBag = {
+                            ...bag,
+                            target: row.rows[0],
+                            targetId: Number(row.rows[0].id)
+                        };
+                    }
+                }
+                const result = await executeSkillActionBodies(c, {
+                    ...attackBag,
+                    skill: args.skill,
+                    payload: state.payload,
+                    onlyAction: 'ATTACK'
+                });
+                mergeBodyResult(result);
+                args.context.results.targets = result.payload?.targets || [];
+                args.context.results.heals = result.payload?.heals || [];
+                return {
+                    ok: true,
+                    content: result.content,
+                    payload: result.payload
+                };
+            },
+            resolveHeal: async (c, args) => {
+                const effect = args.effect || {};
+                const context = args.context || {};
+                if (effect.requireDispelled && !context.flags?.dispelled) {
+                    return { ok: true, skipped: true, content: '' };
+                }
+
+                const skillForHeal = {
+                    ...(args.skill || {}),
+                    actionCode: 'HEAL'
+                };
+
+                let recipientOverride = null;
+                if (effect.alliesInTargets) {
+                    const candidateIds = (context.targetIds || [])
+                        .map(Number)
+                        .filter(Boolean);
+                    if (candidateIds.length) {
+                        const rows = await c.query(
+                            'SELECT id, kind FROM characters WHERE id = ANY($1::int[])',
+                            [candidateIds]
+                        );
+                        const actorKind = context.actorKind || bag.actor?.kind || 'player';
+                        recipientOverride = rows.rows
+                            .filter(row => (row.kind || 'player') === actorKind)
+                            .map(row => Number(row.id));
+                    } else {
+                        recipientOverride = [];
+                    }
+                }
+
+                const result = await executeSkillActionBodies(c, {
+                    ...bag,
+                    skill: skillForHeal,
+                    payload: state.payload,
+                    onlyAction: 'HEAL',
+                    recipientOverride
+                });
+                mergeBodyResult(result);
+                return {
+                    ok: true,
+                    heals: result.payload?.heals || [],
+                    content: result.content
+                };
+            },
+            resolveApplyStatus: async (c, args) => {
+                const effect = args.effect || {};
+                const context = args.context || {};
+                const skill = args.skill;
+                const grants = [
+                    ...(Array.isArray(effect.statusKeys) ? effect.statusKeys : []),
+                    ...(Array.isArray(effect.mods)
+                        ? effect.mods.map(item => (
+                            item && item.type === 'mod'
+                                ? item
+                                : { type: 'mod', ...item }
+                        ))
+                        : [])
+                ];
+
+                // Declarative apply on the timing bus: on = actor | target | targets
+                // useSkillBody ??full BUFF/DEBUFF skill body (row / all-allies recipients)
+                if (grants.length && !effect.useSkillBody) {
+                    if (args.onlyOnHit) {
+                        const hitTargets = (context.results?.targets || []).filter(
+                            item => item && (item.anyHit || item.hit || item.segments?.some(s => s.hit))
+                        );
+                        if (!hitTargets.length) {
+                            return { ok: true, applied: [] };
+                        }
+                    }
+
+                    const on = String(effect.on || 'target').toLowerCase();
+                    let recipientIds = [];
+                    if (on === 'actor' || on === 'self') {
+                        recipientIds = [Number(context.actorId)].filter(Boolean);
+                    } else if (on === 'targets') {
+                        recipientIds = (context.targetIds || [])
+                            .map(Number)
+                            .filter(Boolean);
+                    } else {
+        // target = 當前指定目標（可被反應改寫為 context.targetId）
+                        const tid = Number(
+                            primaryTargetId(context) ||
+                            context.targetId ||
+                            bag.targetId ||
+                            0
+                        );
+                        recipientIds = tid ? [tid] : [];
+                    }
+
+                    if (!recipientIds.length) {
+                        return { ok: true, applied: [] };
+                    }
+
+                    const round = bag.battleState?.round || context.round || 1;
+                    const hasDebuff = grants.some(grant => {
+                        if (typeof grant === 'object' && grant.type === 'mod') {
+                            return Number(grant.value) < 0;
+                        }
+                        const def = lookupBuff(typeof grant === 'string' ? grant : null);
+                        return def?.kind === 'debuff';
+                    });
+
+                    let application;
+                    if (hasDebuff) {
+                        application = await applyDebuffBundle(
+                            c,
+                            recipientIds,
+                            grants,
+                            {
+                                sourceSkillKey: skill.key,
+                                sourceCharacterId: Number(context.actorId),
+                                currentRound: round
+                            }
+                        );
+                    } else {
+                        let applied = [];
+                        for (const grant of grants) {
+                            await applyBuffToCharacters(c, recipientIds, grant, {
+                                sourceSkillKey: skill.key,
+                                sourceCharacterId: Number(context.actorId),
+                                expiresRound: round
+                            });
+                            applied = applied.concat(
+                                recipientIds.map(characterId => ({
+                                    characterId,
+                                    key: typeof grant === 'object' && grant.type === 'mod'
+                                        ? combat.modKey(grant.stat, grant.mode)
+                                        : grant
+                                }))
+                            );
+                        }
+                        application = { applied, protected: [], resisted: [] };
+                    }
+
+                    state.charactersChanged = true;
+                    return {
+                        ok: true,
+                        applied: (application.applied || []).map(item => {
+                            const key = item.key || item.buff_key || item.buffKey;
+                            const valueNum = item.value != null
+                                ? item.value
+                                : item.value_num;
+                            const def = lookupBuff(key, valueNum);
+                            return {
+                                characterId: item.characterId || item.character_id,
+                                key,
+                                value: valueNum,
+                                kind: def?.kind || (
+                                    valueNum != null && Number(valueNum) < 0
+                                        ? 'debuff'
+                                        : def?.kind
+                                ),
+                                subtype: def?.subtype
+                            };
+                        }).filter(item => item.characterId && item.key),
+                        application
+                    };
+                }
+
+                // Legacy: whole-skill BUFF / DEBUFF body
+                const result = await executeSkillActionBodies(c, {
+                    ...bag,
+                    skill: args.skill,
+                    payload: state.payload,
+                    onlyAction: args.skill.actionCode === 'DEBUFF' ? 'DEBUFF' : 'BUFF'
+                });
+                mergeBodyResult(result);
+                const applied = result.payload?.application?.applied ||
+                    result.payload?.appliedStatuses ||
+                    [];
+                return {
+                    ok: true,
+                    applied: applied.map(item => ({
+                        characterId: item.characterId || item.character_id,
+                        key: item.key || item.buff_key || item.buffKey,
+                        kind: BUFF_CATALOG[item.key || item.buff_key]?.kind,
+                        subtype: BUFF_CATALOG[item.key || item.buff_key]?.subtype
+                    })).filter(item => item.characterId && item.key),
+                    content: result.content
+                };
+            },
+            resolveLifeSacrifice: async (c, args) => {
+                const actorId = Number(args.context.actorId);
+                const actorRow = args.context.meta?.actorRow || bag.actor;
+                const entries = await getCharacterBuffEntries(c, actorId);
+                const hpRatio = Number(actorRow.max_hp) > 0
+                    ? Number(actorRow.hp) / Number(actorRow.max_hp)
+                    : 1;
+                if (hpRatio >= 0.25) {
+                    const content =
+                        `◆ ${actorRow.name} 使用「不惜生命」\n條件不滿足（HP 未低於 25%），沒有發動。`;
+                    state.content = content;
+                    state.payload = {
+                        ...state.payload,
+                        battleLogContent: `${actorRow.name} 使用「不惜生命」，條件未滿足。`
+                    };
+                    return { ok: true, applied: [], content };
+                }
+                const actorMods = buffModifiers(entries);
+                const effectiveDefense = Math.floor(
+                    Number(actorRow.defense) * actorMods.defenseMult + actorMods.defenseFlat
+                );
+                await applyBuffToCharacters(c, [actorId], 'life_sacrifice', {
+                    sourceSkillKey: args.skill.key,
+                    sourceCharacterId: actorId,
+                    valueNum: Math.max(0, effectiveDefense)
+                });
+                state.charactersChanged = true;
+                const content =
+                        `◆ ${actorRow.name} 使用「不惜生命」\n` +
+                    `失去 ${effectiveDefense} 點防禦，物理攻擊 +${effectiveDefense}`;
+                state.content = content;
+                state.payload = { ...state.payload, battleLogContent: content };
+                return {
+                    ok: true,
+                    applied: [{
+                        characterId: actorId,
+                        key: 'life_sacrifice',
+                        kind: 'special'
+                    }],
+                    content
+                };
+            },
+            resolveStatLink: async (c, args) => {
+                const result = await executeSkillActionBodies(c, {
+                    ...bag,
+                    skill: { ...args.skill, utilityMode: 'light_link', actionCode: 'BUFF' },
+                    payload: state.payload,
+                    onlyAction: 'BUFF'
+                });
+                mergeBodyResult(result);
+                return {
+                    ok: true,
+                    affectedIds: [
+                        Number(args.context.actorId),
+                        Number(primaryTargetId(args.context) || 0)
+                    ].filter(Boolean),
+                    appliedEffects: [
+                        { key: 'light_link_loss', kind: 'debuff', characterId: Number(args.context.actorId) },
+                        { key: 'light_link_gain', kind: 'buff', characterId: Number(primaryTargetId(args.context) || 0) }
+                    ],
+                    content: result.content
+                };
+            },
+            resolveLifeShield: async (c, args) => {
+                const result = await executeSkillActionBodies(c, {
+                    ...bag,
+                    skill: args.skill,
+                    payload: state.payload,
+                    onlyAction: 'BUFF'
+                });
+                mergeBodyResult(result);
+                return { ok: true, content: result.content };
+            },
+            resolveMove: async (c, args) => {
+                const result = await executeSkillActionBodies(c, {
+                    ...bag,
+                    skill: args.skill,
+                    payload: state.payload,
+                    onlyAction: 'MOVE'
+                });
+                mergeBodyResult(result);
+                return { ok: true, content: result.content };
+            },
+            resolveRescue: async (c, args) => {
+                return { ok: true, content: `${args.context.actorName} 開始蓄力救援。` };
+            }
+        }
+    };
+
+    // Same shared ops for active casts and reaction pipelines.
+    result.host = combat.attachSharedHostOps(result.host, {
+        deps: {
+            getCharacterBuffEntries,
+            removeBuffKeys,
+            BUFF_CATALOG
+        },
+        onState: (patch) => {
+            if (patch.charactersChanged) state.charactersChanged = true;
+            if (patch.battlefieldChanged) state.battlefieldChanged = true;
+        }
+    });
+    return result;
+}
+
+function primaryTargetId(context) {
+    return combat.primaryTargetId(context);
+}
+
+/**
+ * Skill action bodies ??generic actionCode runners.
+ * Timing-bus effects (apply_mod / life_sacrifice / ?? resolve via host primitives.
+ */
+async function executeSkillActionBodies(client, ctx) {
+    const {
+        skill, actor, target, actorId, targetId,
+        battleState, reactionFlags = {},
+        requestedDirection = null,
+        actorBuffEntries = [], targetBuffEntries = [],
+        onlyAction = null,
+        recipientOverride = null
+    } = ctx;
+
+    combat.requireSkillRegistered(skill.key);
+
+    let content = '';
+    let payload = ctx.payload || {};
+    let charactersChanged = false;
+    let battlefieldChanged = false;
+    let initiativeChanged = false;
+    /** Socket broadcasts to perform *after* the transaction commits. */
+    const domainEvents = [];
+
+    const action = skill.actionCode;
+    const runAttack = !onlyAction || onlyAction === 'ATTACK';
+    const runHeal = !onlyAction || onlyAction === 'HEAL';
+    const runBuff = !onlyAction || onlyAction === 'BUFF' || onlyAction === 'DEBUFF';
+    const runMove = !onlyAction || onlyAction === 'MOVE';
+
+    if (runAttack && skill.actionCode === 'ATTACK') {
+        const packets = parseDamagePackets(
+            String(skill.effect).split(/若|改為/)[0]
+        );
+
+        const attackTargetIds = await resolveAttackTargetIds(
+            client,
+            actor,
+            target,
+            skill,
+            requestedDirection
+        );
+
+        const targetRows = await client.query(`
+            SELECT *
+            FROM characters
+            WHERE id = ANY($1::int[])
+            ORDER BY id
+            FOR UPDATE
+        `, [attackTargetIds]);
+
+        const actorMods = buffModifiers(actorBuffEntries);
+        const actorBuffKeys = new Set(
+            actorBuffEntries.map(row => row.buff_key)
+        );
+
+        // Pre-attack mods may already be applied by registry onActive (戰吼 / 順風耳).
+                const attackHitModifierMatch = String(skill.effect).match(
+                        /【命中([+-]\d+)】/
+                    );
+                    const attackHitModifier = attackHitModifierMatch
+                        ? Number(attackHitModifierMatch[1])
+                        : 0;
+
+                    const defenseIgnoreMatch = String(skill.effect).match(
+                        /無視\s*(\d+)%\s*(?:防禦|防禦和魔抗)/
+                    );
+                    const defenseIgnoreRate = defenseIgnoreMatch
+                        ? clamp(Number(defenseIgnoreMatch[1]), 0, 100)
+                        : 0;
+
+                    const skillUnblockable =
+                        String(skill.effect).includes('【無法格擋】') ||
+                        String(skill.effect).includes('無法被格擋') ||
+                        reactionFlags.unblockable === true;
+
+                    const skillCannotEvade =
+                        String(skill.effect).includes('【無法迴避】') ||
+                        reactionFlags.cannotEvade === true;
+
+                    const criticalDamageRate =
+                        50 +
+                        Math.max(0, Number(actor.crit_damage_bonus || 0)) +
+                        Number(reactionFlags.critDamageBonus || 0);
+                    const criticalMultiplier =
+                        1 + criticalDamageRate / 100;
+
+                    const meleeAttack = String(skill.effect).includes('近戰攻擊');
+                    const empowerActive =
+                        meleeAttack &&
+                        actorMods.empowerMagic > 0 &&
+                        packets.some(packet => packet.damageType === '物理');
+
+        let darknessAvailable = actorBuffKeys.has('darkness');
+                    let darknessConsumed = false;
+                    const targetSummaries = [];
+                    const allTargetResults = [];
+                    const allHealResults = [];
+                    let grandTotalDamage = 0;
+                    let grandHpLoss = 0;
+                    let anyAttackHit = false;
+
+                    for (const attackTarget of targetRows.rows) {
+// 友方改治療：attack_segment.params.allyHeal
+                        const allyHeal = combat.allyHealSpec(skill);
+                        if (
+                            allyHeal &&
+                            (attackTarget.kind || 'player') === (actor.kind || 'player')
+                        ) {
+                            const oldHp = Number(attackTarget.hp);
+                            const effectiveMagic = Math.floor(
+                                Number(actor.matk) * actorMods.matkMult + actorMods.matkFlat
+                            );
+                            const ratio = Number(allyHeal.ratio || 0.75);
+                            const heal = Math.max(1, Math.floor(effectiveMagic * ratio));
+                            const newHp = Math.min(Number(attackTarget.max_hp), oldHp + heal);
+                            const actualHeal = Math.max(0, newHp - oldHp);
+
+                            if (actualHeal > 0) {
+                                await client.query(
+                                    'UPDATE characters SET hp = $1 WHERE id = $2',
+                                    [newHp, attackTarget.id]
+                                );
+                                charactersChanged = true;
+                            }
+
+                            targetSummaries.push(
+                                `✚ ${attackTarget.name} HP ${oldHp} → ${newHp}` +
+                                (actualHeal ? `（+${actualHeal}）` : '')
+                            );
+
+                            allHealResults.push({
+                                targetId: Number(attackTarget.id),
+                                targetName: attackTarget.name,
+                                heal: actualHeal,
+                                oldHp,
+                                newHp
+                            });
+                            continue;
+                        }
+
+                        const targetBuffEntriesNow = await getCharacterBuffEntries(
+                            client,
+                            attackTarget.id
+                        );
+                        const targetBuffKeysNow = new Set(
+                            targetBuffEntriesNow.map(row => row.buff_key)
+                        );
+                        const targetMods = buffModifiers(targetBuffEntriesNow);
+
+                        const effectiveHit = Math.floor(
+                            Number(actor.hit_rate) +
+                            actorMods.hitFlat +
+                            attackHitModifier
+                        );
+
+                        const effectiveDodge = targetBuffKeysNow.has('frozen')
+                            ? 0
+                            : Math.floor(
+                                Number(attackTarget.dodge) *
+                                targetMods.dodgeMult +
+                                targetMods.dodgeFlat
+                            );
+
+                        const effectiveCrit = Math.floor(
+                            Number(actor.crit) +
+                            actorMods.critFlat +
+                            Number(reactionFlags.critFlat || 0)
+                        );
+
+                        const hitThreshold = skillCannotEvade
+                            ? effectiveHit
+                            : effectiveHit - effectiveDodge;
+
+                        const effectiveBlockRate = clamp(
+                            Number(attackTarget.block_rate || 0) + targetMods.blockFlat,
+                            0,
+                            75
+                        );
+
+                        const lines = [];
+                        const segmentResults = [];
+                        let rawTotalDamage = 0;
+                        let segment = 0;
+                        let anyHit = false;
+                        let anyPhysicalAttack = false;
+                        let anyBlock = false;
+                        let mirageConsumed = false;
+                        let bleedTriggerCount = 0;
+
+                        const bleedingEntry = targetBuffEntriesNow.find(
+                            row => row.buff_key === 'bleeding'
+                        );
+                        let bleedLossPerHit = 0;
+                        if (bleedingEntry?.source_character_id) {
+                            const bleedMagic = await sourceEffectiveMagic(
+                                client,
+                                bleedingEntry.source_character_id
+                            );
+                            bleedLossPerHit = Math.max(
+                                1,
+                                Math.floor(bleedMagic * 0.5)
+                            );
+                        }
+
+                        for (const packet of packets) {
+                            for (let i = 0; i < packet.hits; i++) {
+                                segment += 1;
+
+                                const roll = Math.floor(Math.random() * 100) + 1;
+                                let hit = roll <= hitThreshold;
+                                let forcedMissReason = '';
+
+                                // 黑暗：下一段攻擊必定無法命中。
+                                if (darknessAvailable) {
+                                    hit = false;
+                                    forcedMissReason = '黑暗';
+                                    darknessAvailable = false;
+                                    darknessConsumed = true;
+                                }
+
+                                // 幻影：下一次原本會命中的攻擊，直接迴避該段。
+                                if (
+                                    hit &&
+                                    !mirageConsumed &&
+                                    targetBuffKeysNow.has('mirage')
+                                ) {
+                                    hit = false;
+                                    forcedMissReason = '幻影';
+                                    mirageConsumed = true;
+                                    await removeBuffKeys(
+                                        client,
+                                        attackTarget.id,
+                                        ['mirage']
+                                    );
+                                    charactersChanged = true;
+                                }
+
+                                anyHit ||= hit;
+                                anyAttackHit ||= hit;
+
+                                const physical = packet.damageType === '物理';
+                                anyPhysicalAttack ||= physical;
+
+                                const canBlock =
+                                    hit &&
+                                    physical &&
+                                    !skillUnblockable &&
+                                    !actorMods.unblockable &&
+                                    !targetMods.blockDisabled &&
+                                    (targetMods.autoGuard || targetMods.guardReady);
+
+                                const blocked = Boolean(canBlock);
+                                anyBlock ||= blocked;
+
+                                // 被格擋的攻擊不能暴擊；魔法傷害本身無法格擋。
+                                const critical =
+                                    hit &&
+                                    !blocked &&
+                                    reactionFlags.cannotCrit !== true &&
+                                    roll <= effectiveCrit;
+
+                                let damage = 0;
+                                let bonusMagic = 0;
+
+                                if (hit) {
+                                    const rawStat =
+                                        packet.damageType === '魔法'
+                                            ? Number(actor.matk)
+                                            : Number(actor.patk);
+
+                                    const attackMult =
+                                        packet.damageType === '魔法'
+                                            ? actorMods.matkMult
+                                            : actorMods.patkMult;
+
+                                    const attackFlat =
+                                        packet.damageType === '魔法'
+                                            ? actorMods.matkFlat
+                                            : 0;
+
+                                    const rawDefense =
+                                        packet.damageType === '魔法'
+                                            ? Number(attackTarget.resist)
+                                            : Number(attackTarget.defense);
+
+                                    const defenseMult =
+                                        packet.damageType === '魔法'
+                                            ? targetMods.resistMult
+                                            : targetMods.defenseMult;
+
+                                    const effectiveAttack = Math.floor(
+                                        rawStat * attackMult + attackFlat
+                                    );
+
+                                    const ignoreDefenseForReaction =
+                                        Number(reactionFlags.ignoreDefenseTargetId || 0) ===
+                                        Number(attackTarget.id);
+
+                                    const effectiveDefense = ignoreDefenseForReaction
+                                        ? 0
+                                        : Math.floor(
+                                            rawDefense *
+                                            defenseMult *
+                                            (1 - defenseIgnoreRate / 100)
+                                        );
+
+                                    const baseDamage = Math.floor(
+                                        effectiveAttack * packet.multiplier
+                                    );
+
+                                    const blockFactor = blocked
+                                        ? 1 - effectiveBlockRate / 100
+                                        : 1;
+
+                                    const allDamageModifier = Math.max(
+                                        0,
+                                        1 +
+                                        (actorMods.damageMult - 1) +
+                                        (targetMods.damageTakenMult - 1)
+                                    );
+
+                                    damage = Math.max(
+                                        1,
+                                        Math.floor(
+                                            baseDamage *
+                                            blockFactor *
+                                            allDamageModifier *
+                                            (critical ? criticalMultiplier : 1) -
+                                            effectiveDefense
+                                        )
+                                    );
+
+                                    rawTotalDamage += damage;
+
+                                    if (bleedLossPerHit > 0) {
+                                        bleedTriggerCount += 1;
+                                    }
+
+                                    // 賦能：下一次物理近戰攻擊每一個命中段附加 0.5 魔法。
+                                    if (empowerActive && physical) {
+                                        const magicAttack = Math.floor(
+                                            Number(actor.matk) *
+                                            actorMods.matkMult +
+                                            actorMods.matkFlat
+                                        );
+                                        const magicResist = Math.floor(
+                                            Number(attackTarget.resist) *
+                                            targetMods.resistMult
+                                        );
+
+                                        const bonusDamageModifier = Math.max(
+                                            0,
+                                            1 +
+                                            (actorMods.damageMult - 1) +
+                                            (targetMods.damageTakenMult - 1)
+                                        );
+
+                                        bonusMagic = Math.max(
+                                            1,
+                                            Math.floor(
+                                                magicAttack *
+                                                actorMods.empowerMagic *
+                                                bonusDamageModifier *
+                                                (critical ? criticalMultiplier : 1) -
+                                                magicResist
+                                            )
+                                        );
+
+                                        rawTotalDamage += bonusMagic;
+                                    }
+                                }
+
+                                const blockText = blocked
+                                    ? `・格擋${effectiveBlockRate}%`
+                                    : '';
+                                const bonusText = bonusMagic
+                                    ? `＋賦能魔法 ${bonusMagic}`
+                                    : '';
+                                const forcedMissText = forcedMissReason
+                                    ? `（${forcedMissReason}）`
+                                    : '';
+
+                                lines.push(
+                                    `第${segment}段 🎲 ${roll}/${hitThreshold} → ` +
+                                    (
+                                        hit
+                                            ? (
+                                                critical
+                                                    ? `暴擊 ${damage}${bonusText}`
+                                                    : `命中 ${damage}${blockText}${bonusText}`
+                                            )
+                                            : `未命中${forcedMissText}`
+                                    )
+                                );
+
+                                segmentResults.push({
+                                    segment,
+                                    roll,
+                                    hitThreshold,
+                                    hit,
+                                    forcedMissReason,
+                                    blocked,
+                                    blockRate: blocked ? effectiveBlockRate : 0,
+                                    critical,
+                                    damage,
+                                    bonusMagic,
+                                    damageType: packet.damageType
+                                });
+                            }
+                        }
+
+                        // 攻擊指定時的反應，直接作用在本次攻擊的傷害段。
+                        const negateAllForThisTarget =
+                            Number(reactionFlags.negateAllDamageTargetId || 0) ===
+                            Number(attackTarget.id);
+
+                        const negateOneForThisTarget =
+                            Number(reactionFlags.negateOneSegmentTargetId || 0) ===
+                            Number(attackTarget.id);
+
+                        if (negateAllForThisTarget) {
+                            for (const result of segmentResults) {
+                                if (!result.hit) continue;
+                                result.reactionPreventedDamage =
+                                    Number(result.damage || 0) +
+                                    Number(result.bonusMagic || 0);
+                                result.damage = 0;
+                                result.bonusMagic = 0;
+                            }
+                            lines.push('反應效果：本次攻擊傷害無效');
+                        } else if (negateOneForThisTarget) {
+                            const firstHit = segmentResults.find(item => item.hit);
+                            if (firstHit) {
+                                firstHit.reactionPreventedDamage =
+                                    Number(firstHit.damage || 0) +
+                                    Number(firstHit.bonusMagic || 0);
+                                firstHit.damage = 0;
+                                firstHit.bonusMagic = 0;
+                                lines.push(`反應效果：第${firstHit.segment}段傷害無效`);
+                            }
+                        }
+
+                        // 依「每一段傷害」順序結算護盾 / 狂暴 / 死鬥，
+                        // 避免多段攻擊被錯誤視為一筆總傷害。
+                        const shieldEntry = targetBuffEntriesNow.find(
+                            row => row.buff_key === 'life_shield'
+                        );
+                        const shieldBefore =
+                            shieldEntry?.value_num === null ||
+                            shieldEntry?.value_num === undefined
+                                ? 0
+                                : Number(shieldEntry.value_num);
+
+                        const oldHp = Number(attackTarget.hp);
+                        let runningHp = oldHp;
+                        let shieldAfter = shieldBefore;
+                        let shieldAbsorbed = 0;
+                        let hpDamage = 0;
+                        let berserkTriggered = false;
+                        let duelPrevented = false;
+                        let berserkAvailable = targetBuffKeysNow.has('berserk');
+                        const duelActive = targetBuffKeysNow.has('duel');
+
+                        for (const result of segmentResults) {
+                            if (!result.hit) continue;
+
+                            let segmentDamage =
+                                Number(result.damage || 0) +
+                                Number(result.bonusMagic || 0);
+
+                            if (segmentDamage <= 0) continue;
+
+                            if (shieldAfter > 0) {
+                                const absorbed = Math.min(
+                                    shieldAfter,
+                                    segmentDamage
+                                );
+                                shieldAfter -= absorbed;
+                                segmentDamage -= absorbed;
+                                shieldAbsorbed += absorbed;
+                            }
+
+                            if (segmentDamage <= 0) continue;
+
+                            // 狂暴針對「下一次會致死的傷害段」：
+                            // 該段傷害改為 0，之後的攻擊段仍正常結算。
+                            if (
+                                berserkAvailable &&
+                                runningHp - segmentDamage <= 0
+                            ) {
+                                berserkAvailable = false;
+                                berserkTriggered = true;
+                                result.berserkPreventedDamage = segmentDamage;
+                                segmentDamage = 0;
+                            }
+
+                            if (segmentDamage <= 0) continue;
+
+                            const beforeSegmentHp = runningHp;
+                            runningHp = Math.max(
+                                duelActive ? 1 : 0,
+                                runningHp - segmentDamage
+                            );
+
+                            const actualSegmentLoss = Math.max(
+                                0,
+                                beforeSegmentHp - runningHp
+                            );
+                            hpDamage += actualSegmentLoss;
+
+                            if (
+                                duelActive &&
+                                beforeSegmentHp - segmentDamage < 1
+                            ) {
+                                duelPrevented = true;
+                                result.duelPreventedDamage =
+                                    Math.max(
+                                        0,
+                                        segmentDamage - actualSegmentLoss
+                                    );
+                            }
+                        }
+
+                        if (shieldBefore > 0) {
+                            if (shieldAfter > 0) {
+                                await client.query(`
+                                    UPDATE character_buffs
+                                    SET value_num = $1
+                                    WHERE character_id = $2
+                                      AND buff_key = 'life_shield'
+                                `, [shieldAfter, attackTarget.id]);
+                            } else {
+                                await removeBuffKeys(
+                                    client,
+                                    attackTarget.id,
+                                    ['life_shield']
+                                );
+                            }
+
+                            if (shieldAfter !== shieldBefore) {
+                                charactersChanged = true;
+                            }
+                        }
+
+                        if (berserkTriggered) {
+                            await removeBuffKeys(
+                                client,
+                                attackTarget.id,
+                                ['berserk']
+                            );
+                            charactersChanged = true;
+                        }
+
+                        const newHp = runningHp;
+
+                        if (newHp !== oldHp) {
+                            await client.query(
+                                'UPDATE characters SET hp = $1 WHERE id = $2',
+                                [newHp, attackTarget.id]
+                            );
+                            charactersChanged = true;
+                        }
+
+                        // 流血屬於「額外損失 HP」，不走防禦 / 魔抗 / 護盾。
+                        let bleedLoss = 0;
+                        if (bleedTriggerCount > 0 && bleedLossPerHit > 0) {
+                            const bleedResult = await applyDirectHpLoss(
+                                client,
+                                attackTarget.id,
+                                bleedLossPerHit * bleedTriggerCount
+                            );
+                            bleedLoss = bleedResult.loss;
+                            if (bleedLoss > 0) charactersChanged = true;
+                        }
+
+                        // 基礎格擋保留到下一次物理攻擊。
+                        if (
+                            anyPhysicalAttack &&
+                            targetBuffKeysNow.has('guard_ready')
+                        ) {
+                            await removeBuffKeys(
+                                client,
+                                attackTarget.id,
+                                ['guard_ready']
+                            );
+                            charactersChanged = true;
+                        }
+
+                        // 「下一次受傷」能力值修正（含舊障壁／受到傷害下降一次）
+                        if (
+                            hpDamage > 0 &&
+                            targetMods.consumeOnDamageKeys.length
+                        ) {
+                            await removeBuffKeys(
+                                client,
+                                attackTarget.id,
+                                targetMods.consumeOnDamageKeys
+                            );
+                            charactersChanged = true;
+                        }
+
+                        // 冰凍：受到真正 HP 傷害後解除；若護盾全擋住則不算受到傷害。
+                        if (
+                            hpDamage > 0 &&
+                            targetBuffKeysNow.has('frozen')
+                        ) {
+                            await removeBuffKeys(
+                                client,
+                                attackTarget.id,
+                                ['frozen']
+                            );
+                            charactersChanged = true;
+                        }
+
+                        // 命中時施加異常 / 數值減益；庇護會擋住整組減益。
+                        // onHitPerPacket：依命中段序套用不同狀態（元素交響曲／封口等）。
+                        const perPacket = combat.onHitPerPacket(skill);
+                        if (perPacket && perPacket.length) {
+                            for (const result of segmentResults) {
+                                if (!result.hit) continue;
+                                const idx = Math.max(0, Number(result.segment || 1) - 1);
+                                const packetDebuffs = perPacket[idx] || [];
+                                if (!packetDebuffs.length) continue;
+                                const applied = await applyDebuffBundle(
+                                    client,
+                                    [attackTarget.id],
+                                    packetDebuffs,
+                                    {
+                                        sourceSkillKey: skill.key,
+                                        sourceCharacterId: actorId,
+                                        currentRound: battleState.round
+                                    }
+                                );
+                                if (applied.applied.length || applied.protected.length) {
+                                    charactersChanged = true;
+                                }
+                                if (applied.applied.length) {
+                                    const names = [...new Set(
+                                        applied.applied.map(
+                                            item => BUFF_CATALOG[item.key]?.name || item.key
+                                        )
+                                    )];
+                                    lines.push(
+                                        `第${result.segment}段命中效果：施加【${names.join('】、【')}】`
+                                    );
+                                }
+                                if (applied.protected.length) {
+                                    lines.push('【庇護】發動：本次命中附帶的減益無效');
+                                }
+                            }
+                        }
+
+                        const hitDebuffs = [
+                            ...onHitStatusGrants(skill)
+                        ];
+
+                        if (
+                            anyHit &&
+                            (
+                                actorMods.applyBlockSealOnHit ||
+                                reactionFlags.applyBlockSealOnHit === true
+                            )
+                        ) {
+                            hitDebuffs.push('block_seal');
+                        }
+
+                        if (
+                            anyHit &&
+                            reactionFlags.applyBleedOnHit === true
+                        ) {
+                            hitDebuffs.push('bleeding');
+                        }
+
+                        if (anyHit && hitDebuffs.length) {
+                            const applied = await applyDebuffBundle(
+                                client,
+                                [attackTarget.id],
+                                hitDebuffs,
+                                {
+                                    sourceSkillKey: skill.key,
+                                    sourceCharacterId: actorId,
+                                    currentRound: battleState.round
+                                }
+                            );
+
+                            if (
+                                applied.applied.length ||
+                                applied.protected.length
+                            ) {
+                                charactersChanged = true;
+                            }
+
+                            if (
+                                applied.applied.some(
+                                    item => Boolean(
+                                        BUFF_CATALOG[item.key]?.modifiers?.speedFlat
+                                    )
+                                )
+                            ) {
+                                initiativeChanged = true;
+                            }
+
+                            if (applied.applied.length) {
+                                const names = [...new Set(
+                                    applied.applied.map(
+                                        item => BUFF_CATALOG[item.key]?.name || item.key
+                                    )
+                                )];
+                                lines.push(`命中效果：施加【${names.join('】、【')}】`);
+                            }
+
+                            if (applied.protected.length) {
+                                lines.push('【庇護】發動：本次命中附帶的減益無效');
+                            }
+
+                            if (applied.resisted.length) {
+                                lines.push('【抗性】已有相同抗性狀態，本次不再生效');
+                            }
+                        }
+
+                        // 鋒銳：命中後施加流血。
+                        if (anyHit && actorMods.applyBleedOnHit) {
+                            const applied = await applyDebuffBundle(
+                                client,
+                                [attackTarget.id],
+                                ['bleeding'],
+                                {
+                                    sourceSkillKey: skill.key,
+                                    sourceCharacterId: actorId,
+                                    currentRound: battleState.round
+                                }
+                            );
+                            if (applied.applied.length || applied.protected.length) {
+                                charactersChanged = true;
+                            }
+                            if (applied.applied.length) {
+                                lines.push('鋒銳：施加【流血】');
+                            }
+                            if (applied.protected.length) {
+                                lines.push('【庇護】發動：流血無效');
+                            }
+                        }
+
+                        const finalHpRow = await client.query(
+                            'SELECT hp FROM characters WHERE id = $1',
+                            [attackTarget.id]
+                        );
+                        const finalHp = Number(finalHpRow.rows[0]?.hp ?? newHp);
+
+                        const effectLines = [];
+                        if (shieldAbsorbed > 0) {
+                            effectLines.push(
+                                `護盾吸收 ${shieldAbsorbed}（${shieldBefore} → ${shieldAfter}）`
+                            );
+                        }
+                        if (bleedLoss > 0) {
+                            effectLines.push(`【流血】額外損失 ${bleedLoss} HP`);
+                        }
+                        if (berserkTriggered) {
+                            effectLines.push('【狂暴】發動：本次致死傷害改為 0');
+                        }
+                        if (duelPrevented) {
+                            effectLines.push('【死鬥】發動：HP 保留在 1');
+                        }
+                        if (anyBlock) {
+                            effectLines.push(`格擋率 ${effectiveBlockRate}% 生效`);
+                        }
+
+                        grandTotalDamage += rawTotalDamage;
+                        grandHpLoss += Math.max(0, oldHp - finalHp);
+
+                        targetSummaries.push(
+                            `⚔ ${attackTarget.name} HP ${oldHp} → ${finalHp}` +
+                            (effectLines.length ? `\n${effectLines.join('；')}` : '') +
+                            `\n${lines.join('\n')}`
+                        );
+
+                        allTargetResults.push({
+                            targetId: Number(attackTarget.id),
+                            targetName: attackTarget.name,
+                            targetSnapshot: {
+                                id: Number(attackTarget.id),
+                                name: attackTarget.name,
+                                kind: attackTarget.kind || 'player'
+                            },
+                            hitThreshold,
+                            effectiveHit,
+                            effectiveDodge,
+                            effectiveCrit,
+                            rawTotalDamage,
+                            hpLoss: Math.max(0, oldHp - finalHp),
+                            oldHp,
+                            newHp: finalHp,
+                            shieldAbsorbed,
+                            bleedLoss,
+                            berserkTriggered,
+                            duelPrevented,
+                            packets: segmentResults
+                        });
+                    }
+
+                    if (darknessConsumed) {
+                        await removeBuffKeys(
+                            client,
+                            actorId,
+                            ['darkness']
+                        );
+                        charactersChanged = true;
+                    }
+
+                    // 下一次攻擊型 Buff 在整個戰技結束後消耗一次。
+                    const attackConsumeKeys = [
+                        ...actorMods.consumeOnAttackKeys
+                    ];
+                    if (empowerActive) attackConsumeKeys.push('empower');
+                    if (actorBuffKeys.has('sharpness')) {
+                        attackConsumeKeys.push('sharpness');
+                    }
+
+                    if (attackConsumeKeys.length) {
+                        await removeBuffKeys(
+                            client,
+                            actorId,
+                            attackConsumeKeys
+                        );
+                        charactersChanged = true;
+                    }
+
+                    // 攻擊後對自身施加狀態（防禦斬等）：attack_segment.afterAttackSelf
+                    const selfAfter = combat.afterAttackSelf(skill);
+                    if (selfAfter?.length) {
+                        await applyStatusBundle(
+                            client,
+                            [actorId],
+                            selfAfter,
+                            {
+                                sourceSkillKey: skill.key,
+                                sourceCharacterId: actorId,
+                                expiresRound: battleState.round
+                            }
+                        );
+                        charactersChanged = true;
+                    }
+
+                    const targetLabel =
+                        allTargetResults.length > 1
+                            ? `${allTargetResults.length} 名敵方`
+                            : allTargetResults[0]?.targetName || target.name;
+
+                    content =
+                        `⚔ ${actor.name} 使用「${skill.name}」→ ${targetLabel}\n` +
+                        (
+                            targetSummaries.length
+                                ? targetSummaries.join('\n\n')
+                                : '沒有可結算的攻擊目標'
+                        );
+
+                    payload = {
+                        ...payload,
+                        targetIds: attackTargetIds,
+                        heals: allHealResults,
+                        totalDamage: grandTotalDamage,
+                        totalHpLoss: grandHpLoss,
+                        targets: allTargetResults,
+                        battleLogContent:
+                            `${actor.name} 使用「${skill.name}」攻擊 ${targetLabel}。\n` +
+                            (
+                                targetSummaries.length
+                                    ? targetSummaries.join('\n')
+                                    : '沒有造成傷害。'
+                            )
+                    };
+
+    } else if (runHeal && (skill.actionCode === 'HEAL' || onlyAction === 'HEAL')) {
+        const recipientIds = Array.isArray(recipientOverride)
+            ? recipientOverride.map(Number).filter(Boolean)
+            : await autoRecipientIds(
+                client,
+                actor,
+                target,
+                skill
+            );
+
+        if (!recipientIds.length) {
+            content = `✚ ${actor.name} 使用「${skill.name}」：沒有可恢復的目標`;
+            payload = {
+                ...payload,
+                recipientIds: [],
+                heals: [],
+                totalHeal: 0,
+                battleLogContent: content
+            };
+        } else {
+        const recipientResult = await client.query(`
+            SELECT *
+            FROM characters
+            WHERE id = ANY($1::int[])
+            ORDER BY id
+            FOR UPDATE
+        `, [recipientIds]);
+
+        const actorBuffResult = await client.query(`
+            SELECT buff_key, stack_count, value_num
+            FROM character_buffs
+            WHERE character_id = $1
+        `, [actorId]);
+
+        const actorMods = buffModifiers(actorBuffResult.rows);
+        const effectiveMagic = Math.floor(
+            Number(actor.matk) *
+            actorMods.matkMult +
+            actorMods.matkFlat
+        );
+
+        const resultLines = [];
+        const healResults = [];
+        let totalHeal = 0;
+
+        for (const recipient of recipientResult.rows) {
+            const oldHp = Number(recipient.hp);
+            let newHp = oldHp;
+            let heal = 0;
+            const recipientEquipped = await getEquippedSkillKeys(client, recipient.id);
+            const recipientHasGrit = combat.hasGrit(recipientEquipped);
+            const allowNormalHeal = combat.canReceiveNormalHeal(recipient, {
+                hasGritPassive: recipientHasGrit
+            });
+
+            if (combat.healMode(skill) === 'revive') {
+                if (oldHp <= 0) {
+                    newHp = Math.min(Number(recipient.max_hp), 1);
+                    heal = Math.max(0, newHp - oldHp);
+                }
+            } else if (!allowNormalHeal && combat.healMode(skill) !== 'life_transfer') {
+                resultLines.push(
+                    `${recipient.name} 處於擊倒，無法受到常規恢復`
+                );
+                healResults.push({
+                    targetId: Number(recipient.id),
+                    targetName: recipient.name,
+                    heal: 0,
+                    oldHp,
+                    newHp,
+                    blocked: true
+                });
+                continue;
+            } else if (combat.healMode(skill) === 'life_transfer') {
+                const transfer = Math.max(
+                    0,
+                    Math.floor(Number(actor.hp) * 0.5)
+                );
+
+                const actorHasDuel = actorBuffResult.rows.some(
+                    row => row.buff_key === 'duel'
+                );
+                const actorNewHp = Math.max(
+                    actorHasDuel ? 1 : 0,
+                    Number(actor.hp) - transfer
+                );
+
+                newHp = Math.min(
+                    Number(recipient.max_hp),
+                    oldHp + transfer
+                );
+
+                heal = Math.max(0, newHp - oldHp);
+
+                await client.query(
+                    'UPDATE characters SET hp = $1 WHERE id = $2',
+                    [actorNewHp, actorId]
+                );
+                actor.hp = actorNewHp;
+                charactersChanged = true;
+            } else {
+                const magic = String(skill.effect).match(
+                    /恢復[^【]*【([0-9.]+)(物理|魔法)】/
+                );
+
+                if (magic) {
+                    const stat =
+                        magic[2] === '物理'
+                            ? Math.floor(
+                                Number(actor.patk) *
+                                actorMods.patkMult
+                            )
+                            : effectiveMagic;
+
+                    heal = Math.max(
+                        1,
+                        Math.floor(stat * Number(magic[1]))
+                    );
+                } else if (percentHp) {
+                    heal = Math.max(
+                        1,
+                        Math.floor(
+                            Number(recipient.max_hp) *
+                            Number(percentHp[1]) /
+                            100
+                        )
+                    );
+                }
+
+                newHp = Math.min(
+                    Number(recipient.max_hp),
+                    oldHp + heal
+                );
+                heal = Math.max(0, newHp - oldHp);
+            }
+
+            if (newHp !== oldHp) {
+                await client.query(
+                    'UPDATE characters SET hp = $1 WHERE id = $2',
+                    [newHp, recipient.id]
+                );
+                charactersChanged = true;
+            }
+
+            if (combat.healCleanse(skill)) {
+                const debuffRows = await client.query(`
+                    SELECT buff_key
+                    FROM character_buffs
+                    WHERE character_id = $1
+                `, [recipient.id]);
+
+                const debuffKeys = debuffRows.rows
+                    .map(row => row.buff_key)
+                    .filter(key => BUFF_CATALOG[key]?.kind === 'debuff');
+
+                if (debuffKeys.length) {
+                    await removeBuffKeys(
+                        client,
+                        recipient.id,
+                        debuffKeys
+                    );
+                    charactersChanged = true;
+                }
+            }
+
+            totalHeal += heal;
+            healResults.push({
+                targetId: Number(recipient.id),
+                targetName: recipient.name,
+                heal,
+                oldHp,
+                newHp
+            });
+            resultLines.push(
+                `${recipient.name} HP ${oldHp} → ${newHp}` +
+                (heal ? `（+${heal}）` : '')
+            );
+        }
+
+            const recipientNames = recipientResult.rows.map(row => row.name);
+            const recipientLabel =
+                recipientNames.length > 3
+                    ? `${recipientNames.length} 名角色`
+                    : recipientNames.join('、') || target.name;
+
+        content =
+            `◆ ${actor.name} 使用「${skill.name}」→ ${recipientLabel}\n` +
+            (
+                resultLines.length
+                    ? resultLines.join('\n')
+                    : `目前沒有符合條件的恢復目標。\n${skill.effect}`
+            );
+
+        payload = {
+            ...payload,
+            recipientIds,
+            heals: healResults,
+            totalHeal,
+            battleLogContent:
+                `${actor.name} 使用「${skill.name}」→ ${recipientLabel} 進行恢復。` +
+                (resultLines.length ? `\n${resultLines.join('\n')}` : '')
+        };
+        }
+    } else if (
+        skill.actionCode === 'BUFF' ||
+        skill.actionCode === 'DEBUFF' ||
+        skill.actionCode === 'GUARD' ||
+        (skill.actionCode === 'UTILITY' && autoBuffForSkill(skill))
+    ) {
+        const statusKeys =
+            combat.utilityMode(skill) === 'basic_guard'
+                ? ['guard_ready']
+                : (autoBuffForSkill(skill) || []);
+
+        if (!statusKeys.length) {
+            content =
+                `◆ ${actor.name} 使用「${skill.name}」→ ${target.name}\n` +
+                `${skill.effect}\n` +
+                `效果已記錄；此效果目前尚未建立可計算的狀態定義。`;
+
+            payload.battleLogContent =
+                `${actor.name} 對 ${target.name} 使用「${skill.name}」。${skill.effect}`;
+        } else if (combat.utilityMode(skill) === 'life_shield') {
+            const hpCost = Math.max(
+                1,
+                Math.floor(Number(actor.max_hp) * 0.25)
+            );
+            const oldHp = Number(actor.hp);
+            const actorHasDuel = actorBuffEntries.some(
+                row => row.buff_key === 'duel'
+            );
+            const newHp = Math.max(
+                actorHasDuel ? 1 : 0,
+                oldHp - hpCost
+            );
+            const shieldValue = Math.max(0, oldHp - newHp);
+
+            await client.query(
+                'UPDATE characters SET hp = $1 WHERE id = $2',
+                [newHp, actorId]
+            );
+
+            await applyBuffToCharacters(
+                client,
+                [actorId],
+                'life_shield',
+                {
+                    sourceSkillKey: skill.key,
+                    sourceCharacterId: actorId,
+                    expiresRound: battleState.round,
+                    valueNum: shieldValue
+                }
+            );
+
+            charactersChanged = true;
+
+            content =
+                `⬆ ${actor.name} 使用「生命守護」\n` +
+                `HP ${oldHp} → ${newHp}\n` +
+                `獲得 ${shieldValue} 點護盾`;
+
+            payload = {
+                ...payload,
+                shieldValue,
+                oldHp,
+                newHp,
+                battleLogContent:
+                    `${actor.name} 使用「生命守護」：消耗 ${hpCost} HP，獲得 ${shieldValue} 點護盾。`
+            };
+        } else if (combat.utilityMode(skill) === 'light_link') {
+            const beforeLinkMods = buffModifiers(actorBuffEntries);
+            const beforeLinkMagic = Math.floor(
+                Number(actor.matk) * beforeLinkMods.matkMult +
+                beforeLinkMods.matkFlat
+            );
+            const afterLinkMagic = Math.floor(
+                Number(actor.matk) *
+                Math.max(0, beforeLinkMods.matkMult - 0.5) +
+                beforeLinkMods.matkFlat
+            );
+            const lostMagic = Math.max(
+                0,
+                beforeLinkMagic - afterLinkMagic
+            );
+
+            await applyBuffToCharacters(
+                client,
+                [actorId],
+                'light_link_loss',
+                {
+                    sourceSkillKey: skill.key,
+                    sourceCharacterId: actorId,
+                    expiresRound: battleState.round
+                }
+            );
+
+            await applyBuffToCharacters(
+                client,
+                [targetId],
+                'light_link_gain',
+                {
+                    sourceSkillKey: skill.key,
+                    sourceCharacterId: actorId,
+                    expiresRound: battleState.round,
+                    valueNum: lostMagic
+                }
+            );
+
+            charactersChanged = true;
+
+            content =
+                `✨ ${actor.name} 使用「熠光連結」→ ${target.name}\n` +
+                `${actor.name} 魔法攻擊 -50%\n` +
+                `${target.name} 魔法攻擊 +${lostMagic}`;
+
+            payload = {
+                ...payload,
+                lostMagic,
+                battleLogContent:
+                    `${actor.name} 使用「熠光連結」連結 ${target.name}：` +
+                    `${actor.name} 魔法攻擊 -50%，${target.name} 魔法攻擊 +${lostMagic}。`
+            };
+        } else {
+            let recipientIds;
+
+            // 狀態記在自身（死鬥 value_num = 目標 id；狂暴／假死本身也是 SELF）
+            if (combat.applySelfStatus(skill)) {
+                recipientIds = [actorId];
+            } else {
+                recipientIds = await autoRecipientIds(
+                    client,
+                    actor,
+                    target,
+                    skill
+                );
+            }
+
+            const expiresRound =
+                statusKeys.some(key =>
+                    typeof key === 'string' &&
+                    ['stun', 'darkness', 'frozen', 'feign_death', 'berserk'].includes(key)
+                )
+                    ? battleState.round + 1
+                    : skillBuffExpiresRound(skill, battleState.round);
+
+            let application = {
+                applied: [],
+                protected: [],
+                resisted: []
+            };
+
+            const valueNum = combat.buffValueFromTarget(skill)
+                ? Number(targetId)
+                : null;
+
+            const hasDebuffOrSpecial = statusKeys.some(key => {
+                if (typeof key === 'object' && key.type === 'mod') {
+                    return Number(key.value) < 0;
+                }
+                const definition = lookupBuff(
+                    typeof key === 'string' ? key : null
+                );
+                return definition && (
+                    definition.kind === 'debuff' ||
+                    definition.kind === 'special' ||
+                    definition.resistance
+                );
+            });
+
+            if (hasDebuffOrSpecial) {
+                application = await applyDebuffBundle(
+                    client,
+                    recipientIds,
+                    statusKeys,
+                    {
+                        sourceSkillKey: skill.key,
+                        sourceCharacterId: actorId,
+                        currentRound: battleState.round
+                    }
+                );
+
+                if (combat.buffValueFromTarget(skill) && application.applied.length) {
+                    await client.query(`
+                        UPDATE character_buffs
+                        SET value_num = $1,
+                            expires_round = $2
+                        WHERE character_id = $3
+                          AND buff_key = 'duel'
+                    `, [valueNum, battleState.round, actorId]);
+                }
+            } else {
+                await applyStatusBundle(
+                    client,
+                    recipientIds,
+                    statusKeys,
+                    {
+                        sourceSkillKey: skill.key,
+                        sourceCharacterId: actorId,
+                        expiresRound,
+                        valueNum
+                    }
+                );
+
+                application.applied = recipientIds.flatMap(
+                    characterId => statusKeys.map(key => ({ characterId, key }))
+                );
+            }
+
+            charactersChanged =
+                charactersChanged ||
+                application.applied.length > 0 ||
+                application.protected.length > 0;
+
+            // 資源增益由 skill / buff_segment.resourceGain 宣告（防守姿態 SP、進攻架勢 AP 等）
+            const resourceGain = combat.resourceGainOnBuff(skill);
+            if (resourceGain && (resourceGain.ap || resourceGain.sp)) {
+                await combat.applyApSpGain(client, actorId, {
+                    ap: Number(resourceGain.ap || 0),
+                    sp: Number(resourceGain.sp || 0),
+                    manual: false,
+                    getCharacterBuffEntries,
+                    removeBuffKeys
+                });
+                charactersChanged = true;
+            }
+
+            const recipientNamesResult = await client.query(`
+                SELECT name
+                FROM characters
+                WHERE id = ANY($1::int[])
+                ORDER BY id
+            `, [recipientIds]);
+
+            const recipientNames = recipientNamesResult.rows.map(
+                row => row.name
+            );
+            const recipientLabel =
+                recipientNames.length > 3
+                    ? `${recipientNames.length} 名角色`
+                    : recipientNames.join('、');
+
+            const statusLines = [];
+
+            if (application.protected.length) {
+                statusLines.push('【庇護】發動：本次減益無效');
+            }
+
+            if (application.resisted.length) {
+                statusLines.push('【抗性】同一狀態本場戰鬥已生效過，本次無效');
+            }
+
+            const grantLabel = (grant) => {
+                if (typeof grant === 'object' && grant.type === 'mod') {
+                    return combat.formatModLabel(grant.stat, grant.mode, grant.value);
+                }
+                if (typeof grant === 'string') {
+                    return lookupBuff(grant)?.name || grant;
+                }
+                return null;
+            };
+            const grantEffect = (grant) => {
+                if (typeof grant === 'object' && grant.type === 'mod') {
+                    return grantLabel(grant);
+                }
+                if (typeof grant === 'string') {
+                    const def = lookupBuff(grant);
+                    return def?.effect || def?.name || grant;
+                }
+                return null;
+            };
+            const grantKind = (grant) => {
+                if (typeof grant === 'object' && grant.type === 'mod') {
+                    return Number(grant.value) < 0 ? 'debuff' : 'buff';
+                }
+                if (typeof grant === 'string') {
+                    return lookupBuff(grant)?.kind || null;
+                }
+                return null;
+            };
+
+            const appliedNames = statusKeys
+                .map(grantLabel)
+                .filter(Boolean)
+                .join('、');
+            const appliedEffects = statusKeys
+                .map(grantEffect)
+                .filter(Boolean)
+                .join('；');
+
+            const appliedLabel = application.applied.length
+                ? (appliedNames || '目標')
+                : '';
+            const primaryKind = statusKeys
+                .map(grantKind)
+                .find(Boolean) || 'buff';
+
+            content =
+                `${primaryKind === 'debuff' ? '⬇' : '⬆'} ` +
+                `${actor.name} 使用「${skill.name}」→ ${recipientLabel}\n` +
+                `${appliedLabel}` +
+                (statusLines.length ? `\n${statusLines.join('\n')}` : '') +
+                (
+                    application.applied.length && expiresRound
+                        ? `\n持續至第 ${expiresRound} 輪結束或效果提前觸發`
+                        : ''
+                );
+
+            payload = {
+                ...payload,
+                statusKeys,
+                recipientIds,
+                application,
+                battleLogContent:
+                    `${actor.name} 使用「${skill.name}」→ ${recipientLabel}。` +
+                    ` ${appliedLabel}。` +
+                    (statusLines.length ? ` ${statusLines.join('；')}。` : '')
+            };
+
+            initiativeChanged =
+                initiativeChanged ||
+                statusKeys.some(key => {
+                    if (typeof key === 'object' && key.type === 'mod') {
+                        return key.stat === 'speed' && key.value;
+                    }
+                    const m = lookupBuff(key)?.modifiers || {};
+                    return Boolean(m.speedFlat) || Boolean(m.initiativeFirst);
+                });
+        }
+    } else if (runMove && skill.actionCode === 'MOVE') {
+        const moveParams = combat.moveSegmentParams(skill);
+        if (moveParams.swap) {
+            const grantBoth = Array.isArray(moveParams.grantBoth)
+                ? moveParams.grantBoth
+                : [];
+
+            if ((actor.kind || 'player') !== (target.kind || 'player')) {
+                throw new Error('交換位置只能指定友方');
+            }
+            if (Number(actor.id) === Number(target.id)) {
+                throw new Error('error');
+            }
+
+            const swap = await swapCharacterPositions(
+                client,
+                actor.id,
+                target.id
+            );
+
+            if (grantBoth.length) {
+                await applyStatusBundle(
+                    client,
+                    [actor.id, target.id],
+                    grantBoth,
+                    {
+                        sourceSkillKey: skill.key,
+                        sourceCharacterId: actor.id,
+                        expiresRound: battleState.round
+                    }
+                );
+                charactersChanged = true;
+            }
+
+            content =
+                `↔ ${actor.name} 使用「${skill.name}」與 ${target.name} 交換位置` +
+                (
+                    grantBoth.length
+                        ? `\n雙方本輪迴避 +30`
+                        : `\n位置已立即互換；代受效果需在被攻擊指定時使用`
+                );
+
+            payload = {
+                ...payload,
+                swapped: true,
+                swap,
+                battleLogContent:
+                    `${actor.name} 使用「${skill.name}」→ ${target.name} 交換戰場位置。` +
+                    (
+                        grantBoth.length
+                            ? ' 雙方本輪迴避 +30。'
+                            : ' 快速移位的代受效果需在被攻擊指定時使用。'
+                    )
+            };
+
+            // Emitting here would announce the swap before COMMIT; hand it back
+            // so the route broadcasts it once the transaction succeeded.
+            battlefieldChanged = true;
+            domainEvents.push({
+                event: 'battlefield:changed',
+                data: {
+                    reason: 'swap',
+                    firstCharacterId: Number(actor.id),
+                    secondCharacterId: Number(target.id)
+                }
+            });
+        } else {
+            content =
+                `◆ ${actor.name} 使用「${skill.name}」\n${skill.effect}\n` +
+                `此移動戰技已記錄；需要指定空格的效果可直接拖曳角色完成。`;
+            payload.battleLogContent =
+                `${actor.name} 使用「${skill.name}」。${skill.effect}`;
+        }
+    } else {
+        content =
+            `◆ ${actor.name} 使用「${skill.name}」→ ${target.name}\n` +
+            `${skill.effect}\n` +
+            `目前已完成目標限制與資源消耗，特殊效果仍以戰鬥紀錄為準。`;
+
+        payload.battleLogContent =
+            `${actor.name} 對 ${target.name} 使用「${skill.name}」。${skill.effect}`;
+    }
+
+    const flowSteps = combat.compilePipeline(skill).steps;
+    payload.skillFlow = flowSteps.map(
+        step => step.timing || step.module
+    );
+
+    return {
+        content,
+        payload,
+        charactersChanged,
+        battlefieldChanged,
+        initiativeChanged,
+        domainEvents
+    };
+}
+
 app.post('/api/combat/use-skill', async (req, res) => {
     const actorId = number(req.body.actorId);
     let targetId = number(req.body.targetId, actorId);
@@ -3900,10 +6421,19 @@ app.post('/api/combat/use-skill', async (req, res) => {
     const skill = SKILL_CATALOG[skillKey] || ALL_EQUIPPABLE_SKILLS.get(skillKey);
 
     if (!skill) return res.status(400).json({ error: '未知的戰技' });
+    try {
+        combat.requireSkillRegistered(skill.key);
+    } catch (error) {
+        return res.status(400).json({ error: error.message || '未登記戰技' });
+    }
     if (skill.manual === false || skill.actionCode === 'PASSIVE') {
-        return res.status(400).json({ error: '被動戰技不需要手動發動' });
+        // oncePerBattle / castablePassive skills (e.g. 無限可能的呼喚) stay castable.
+        if (!skill.castablePassive && !skill.oncePerBattle) {
+            return res.status(400).json({ error: 'error' });
+        }
     }
 
+    const isAutoCast = Boolean(req.body.autoCast);
     const client = await pool.connect();
 
     try {
@@ -3942,11 +6472,18 @@ app.post('/api/combat/use-skill', async (req, res) => {
 
             targetId = Number(resolution.targetId || resume.targetId || targetId);
             reactionFlags = resolution.flags || {};
+
+            if (resume.stack) {
+                await saveFlowStack(
+                    client,
+                    combat.restoreStack(resume.stack)
+                );
+            }
         } else {
             const blockingReaction = await client.query(`
                 SELECT id
                 FROM reaction_windows
-                WHERE status IN ('open', 'ready')
+                WHERE status IN ('open', 'ready', 'queued')
                   AND blocking = TRUE
                 ORDER BY id DESC
                 LIMIT 1
@@ -3981,10 +6518,21 @@ app.post('/api/combat/use-skill', async (req, res) => {
 
         if (!actorResult.rows.length) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: '找不到行動角色' });
+            return res.status(404).json({ error: 'error' });
         }
 
         const actor = actorResult.rows[0];
+
+        // 資源必須在指定目標／開反應窗之前就確認，避免騙出他人反應後才因 AP/SP 不足失敗。
+        // 反應續結且已扣過費時略過。
+        if (!reactionFlags.costSpent) {
+            try {
+                combat.assertSkillCostAvailable(actor, skill);
+            } catch (costError) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: costError.message || '資源不足' });
+            }
+        }
 
         if (
             (skill.targetCode || 'SELF') === 'SELF' ||
@@ -4000,7 +6548,7 @@ app.post('/api/combat/use-skill', async (req, res) => {
 
         if (!targetResult.rows.length) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: '找不到目標' });
+            return res.status(404).json({ error: 'error' });
         }
 
         const target = targetResult.rows[0];
@@ -4019,103 +6567,138 @@ app.post('/api/combat/use-skill', async (req, res) => {
 
         const battleState = await getBattleClock(client, true);
 
-        // 攻擊先進入「指定目標」時點。
-        // 只有真的攜帶對應反應戰技、且資源足夠的角色才會出現在面板。
-        if (
-            skill.actionCode === 'ATTACK' &&
-            !reactionResumeId
-        ) {
-            const reactionOptions =
-                await collectAttackDeclaredReactionOptions(
-                    client,
-                    actor,
-                    target,
-                    skill
-                );
+        // oncePerBattle：非主動／非輔助，無戰技時點，每場一次（無限可能的呼喚等）
+        if (skill.oncePerBattle) {
+            const stateRow = await client.query(
+                'SELECT once_flags FROM battle_state WHERE id = 1 FOR UPDATE'
+            );
+            const onceFlags = stateRow.rows[0]?.once_flags || {};
+            const used = onceFlags.infiniteCall || {};
+            if (used[String(actorId)]) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({
+                    error: `「${skill.name}」本場戰鬥已使用過`
+                });
+            }
 
-            if (reactionOptions.length) {
-                const reactionWindow = await createReactionWindow(
-                    client,
-                    {
-                        triggerType: 'attack_declared',
-                        blocking: true,
-                        sourceActorId: actor.id,
-                        sourceTargetId: target.id,
-                        sourceSkillKey: skill.key,
-                        round: battleState.round,
-                        turnPass: battleState.turnPass,
-                        context: {
-                            actorId: Number(actor.id),
-                            actorName: actor.name,
-                            targetId: Number(target.id),
-                            targetName: target.name,
-                            skillName: skill.name,
-                            attack: attackDescriptor(skill)
-                        },
-                        options: reactionOptions,
-                        resumePayload: {
-                            actorId: Number(actor.id),
-                            skillKey: skill.key,
-                            targetId: Number(target.id),
-                            direction: requestedDirection || null
-                        }
-                    }
-                );
+            await client.query(
+                'UPDATE characters SET ap = LEAST(max_ap, ap + 1), sp = LEAST(max_sp, sp + 1) WHERE id = $1',
+                [actorId]
+            );
+            await applyBuffToCharacters(client, [actorId], 'infinite_call_debt', {
+                sourceSkillKey: skill.key,
+                sourceCharacterId: actorId
+            });
+            onceFlags.infiniteCall = { ...used, [String(actorId)]: true };
+            await client.query(
+                'UPDATE battle_state SET once_flags = $1::jsonb, updated_at = NOW() WHERE id = 1',
+                [JSON.stringify(onceFlags)]
+            );
 
-                const declareText =
-                    `⚔ ${actor.name} 宣言「${skill.name}」→ ${target.name}\n` +
-                    `等待可用反應戰技：` +
-                    reactionOptions.map(
-                        item => `${item.actorName}「${item.skillName}」`
-                    ).join('、');
+            const content =
+            `✦ ${actor.name} 使用「${skill.name}」\nAP+1、SP+1；下一次恢復的 AP/SP -1`;
+            const message = await insertChatMessage(client, {
+                channel: 'combat',
+                messageType: 'skill',
+                characterId: actor.id,
+                characterName: actor.name,
+                characterKind: actor.kind || 'player',
+                content,
+                payload: { skillKey, special: 'once_per_battle' }
+            });
+            await client.query('COMMIT');
+            io.emit('chat:message', message);
+            io.emit('characters:changed');
+            return res.json({ success: true, message });
+        }
 
-                const declarationMessage =
-                    await insertChatMessage(client, {
-                        channel: 'combat',
-                        messageType: 'attack_declare',
-                        characterId: actor.id,
-                        characterName: actor.name,
-                        characterKind: actor.kind || 'player',
-                        content: declareText,
-                        payload: {
-                            reactionWindowId: reactionWindow.id,
-                            skillKey: skill.key,
-                            targetId: target.id
-                        }
-                    });
-
-                const declarationEvent =
-                    await insertBattleEvent(client, {
-                        eventType: 'attack_declare',
-                        round: battleState.round,
-                        turnPass: battleState.turnPass,
-                        actorId: actor.id,
-                        targetId: target.id,
-                        content:
-                            `${actor.name} 宣言「${skill.name}」指定 ${target.name}，進入反應時點。`,
-                        payload: {
-                            reactionWindowId: reactionWindow.id,
-                            skillKey: skill.key
-                        }
-                    });
-
-                await client.query('COMMIT');
-
-                io.emit('chat:message', declarationMessage);
-                io.emit('battle:event', declarationEvent);
-                io.emit('combat:reaction-opened', reactionWindow);
-
-                return res.json({
-                    success: true,
-                    reactionPending: true,
-                    reactionWindow,
-                    message: declarationMessage
+        // 蓄力中不可另開主要／輔助行動（自動發動除外）
+        if (!reactionResumeId && !isAutoCast) {
+            const chargingEntries = await getCharacterBuffEntries(client, actorId);
+            if (chargingEntries.some(row => row.buff_key === 'charging')) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({
+                    error: `${actor.name} 正在蓄力，無法發動其他戰技`
                 });
             }
         }
 
-        // 待機：也是主要行動，因此會受到嘲諷 / 中毒影響。
-        if (skill.logicCode === 'WAIT') {
+        // 通用蓄力宣言：只 +1 蓄力、掛 charging，不進戰技發動時點
+        if (
+            !reactionResumeId &&
+            !isAutoCast &&
+            combat.isChargeSkill(skill) &&
+            !combat.isRescueSkill(skill)
+        ) {
+            await enforceActionRestrictions(
+                client, actor, skill, target, requestedDirection
+            );
+            const cost = await spendSkillCost(client, actor, skill);
+            const charge = await combat.beginCharge(client, {
+                actorId,
+                targetId,
+                skill,
+                round: battleState.round,
+                turnPass: battleState.turnPass
+            });
+            await applyBuffToCharacters(client, [actorId], 'charging', {
+                sourceSkillKey: skill.key,
+                sourceCharacterId: actorId,
+                valueNum: charge.progress
+            });
+
+            const content =
+                `⏳ ${actor.name} 「${skill.name}」開始蓄力` +
+                `${charge.progress}/${charge.required}）\n` +
+                `消耗 ${cost.amount}${String(cost.type || '').toUpperCase()}` +
+                `\n（不觸發發動戰技時點；達到蓄力後於自身回合自動發動）`;
+
+            const message = await insertChatMessage(client, {
+                channel: 'combat',
+                messageType: 'skill',
+                characterId: actor.id,
+                characterName: actor.name,
+                characterKind: actor.kind || 'player',
+                content,
+                payload: {
+                    skillKey,
+                    targetId,
+                    charging: true,
+                    charge
+                }
+            });
+
+            await client.query('COMMIT');
+            io.emit('chat:message', message);
+            io.emit('characters:changed');
+            return res.json({ success: true, message, charging: true });
+        }
+
+        if (isAutoCast) {
+            const charges = await combat.getActiveCharges(client, actorId);
+            const match = charges.find(row => String(row.skill_key) === String(skillKey));
+            if (match) await combat.clearCharge(client, match.id);
+            const remaining = await combat.getActiveCharges(client, actorId);
+            if (!remaining.length) {
+                await removeBuffKeys(client, actorId, ['charging']);
+            }
+        }
+
+        if (!reactionResumeId && combat.isActiveSkill(skill)) {
+            try {
+                await assertFreeTimingForActiveSkill(client, skill);
+            } catch (timingError) {
+                await client.query('ROLLBACK');
+                return res.status(timingError.status || 409).json({
+                    error: timingError.message || '目前不是自由時點'
+                });
+            }
+        }
+
+        // Timing pauses (ON_TARGET_DECLARED etc.) are handled by combat.startSkill below.
+
+        // 待機：不消耗主要行動；可在此處理嘲諷 / 中立影響。
+        if (combat.isWaitSkill(skill)) {
             await enforceActionRestrictions(client, actor, skill, target, requestedDirection);
             const waitStatus = await triggerActionStatuses(
                 client,
@@ -4125,7 +6708,7 @@ app.post('/api/combat/use-skill', async (req, res) => {
             );
 
             const content =
-                `… ${actor.name} 選擇待機。` +
+                `◆ ${actor.name} 選擇待機。` +
                 (
                     waitStatus.lines.length
                         ? `\n${waitStatus.lines.join('\n')}`
@@ -4157,6 +6740,7 @@ app.post('/api/combat/use-skill', async (req, res) => {
                 payload: { skillKey: 'wait' }
             });
 
+            await clearFlowStack(client);
             await client.query('COMMIT');
             io.emit('chat:message', message);
             io.emit('battle:event', battleEvent);
@@ -4169,8 +6753,8 @@ app.post('/api/combat/use-skill', async (req, res) => {
             });
         }
 
-        // 救援：【蓄力1】
-        if (skill.logicCode === 'RESCUE') {
+        // 救援：【蓄力】
+        if (combat.isRescueSkill(skill)) {
             const existing = await client.query(`
                 SELECT id
                 FROM pending_actions
@@ -4215,7 +6799,7 @@ app.post('/api/combat/use-skill', async (req, res) => {
             const content =
                 `✚ ${actor.name} 使用「救援」→ ${target.name}\n` +
                 `消耗 ${cost.amount}${String(cost.type || '').toUpperCase()}\n` +
-                `⌛ 蓄力1：將在 ${actor.name} 的下一個回合開始時自動發動` +
+                `⏳ 階段1：於 ${actor.name} 下一回合開始時結算。` +
                 (
                     rescueStatus.lines.length
                         ? `\n${rescueStatus.lines.join('\n')}`
@@ -4243,14 +6827,15 @@ app.post('/api/combat/use-skill', async (req, res) => {
                 actorId: actor.id,
                 targetId: target.id,
                 content:
-                    `${actor.name} 對 ${target.name} 使用「救援」，` +
-                    `消耗 ${cost.amount}${String(cost.type || '').toUpperCase()}，開始蓄力1。`,
+                    `${actor.name} 對 ${target.name} 使用「救援」：` +
+                    `消耗 ${cost.amount}${String(cost.type || '').toUpperCase()}，開始蓄力`,
                 payload: {
                     skillKey,
                     charging: true
                 }
             });
 
+            await clearFlowStack(client);
             await client.query('COMMIT');
             io.emit('chat:message', message);
             io.emit('battle:event', battleEvent);
@@ -4271,40 +6856,41 @@ app.post('/api/combat/use-skill', async (req, res) => {
             requestedDirection
         );
 
-        const cost = await spendSkillCost(client, actor, skill);
+        // Cost is spent by the timing engine (spend_cost primitive), except resume
+        // after a pause that already spent.
+        let cost = { type: null, amount: 0 };
+        if (reactionResumeId && reactionFlags.costSpent) {
+            cost = {
+                type: reactionFlags.costType || null,
+                amount: Number(reactionFlags.costAmount || 0)
+            };
+        }
 
         if (actionRestriction.consumeTaunt) {
             await removeBuffKeys(client, actorId, ['taunt']);
         }
 
-        const actionStatus = await triggerActionStatuses(
-            client,
-            actor,
-            skill,
-            battleState.round
-        );
-
-        if (actionStatus.changed) {
-            const refreshedActor = await client.query(
-                'SELECT * FROM characters WHERE id = $1',
-                [actorId]
-            );
-            if (refreshedActor.rows.length) {
-                Object.assign(actor, refreshedActor.rows[0]);
-            }
-        }
-
-        let charactersChanged = cost.amount > 0 || actionStatus.changed;
+        let charactersChanged = false;
         let initiativeChanged = false;
         let content = '';
-        let payload = {
+        const resolutionMeta = combat.beginSkillResolution({
+            actor,
+            target,
+            skill,
+            direction: requestedDirection || null,
+            round: battleState.round,
+            turnPass: battleState.turnPass,
+            flags: reactionFlags
+        });
+        let payload = combat.annotateSkillPayload({
             skillKey,
             targetId,
             actionCode: skill.actionCode,
-            targetCode: skill.targetCode
-        };
+            targetCode: skill.targetCode,
+            phase: combat.RESOLUTION_PHASES.EXECUTE
+        }, resolutionMeta);
 
-        // 需要計算時使用完整 Buff entry，讓可疊加 Buff 正確參與公式。
+        // 需要結算時使用完整 Buff entry，避免只拿 Buff 定義而漏掉層數。
         const combatBuffRows = await client.query(`
             SELECT
                 character_id,
@@ -4329,1473 +6915,266 @@ app.post('/api/combat/use-skill', async (req, res) => {
             targetBuffEntries.map(row => row.buff_key)
         );
 
-        if (skill.actionCode === 'ATTACK') {
-            const packets = parseDamagePackets(
-                String(skill.effect).split(/若|改為/)[0]
-            );
 
-            const attackTargetIds = await resolveAttackTargetIds(
-                client,
-                actor,
-                target,
-                skill,
-                requestedDirection
-            );
-
-            const targetRows = await client.query(`
-                SELECT *
-                FROM characters
-                WHERE id = ANY($1::int[])
-                ORDER BY id
-                FOR UPDATE
-            `, [attackTargetIds]);
-
-            const actorMods = buffModifiers(actorBuffEntries);
-            const actorBuffKeys = new Set(
-                actorBuffEntries.map(row => row.buff_key)
-            );
-
-            // 【使用時】型的數值效果先套用，讓當次攻擊就會吃到。
-            if (skill.name === '螺旋劍') {
-                await applyDebuffBundle(
-                    client,
-                    [targetId],
-                    ['dodge_down_20'],
-                    {
-                        sourceSkillKey: skill.key,
-                        sourceCharacterId: actorId,
-                        currentRound: battleState.round
-                    }
-                );
-                await applyBuffToCharacters(
-                    client,
-                    [actorId],
-                    'dodge_up_20',
-                    {
-                        sourceSkillKey: skill.key,
-                        sourceCharacterId: actorId,
-                        expiresRound: battleState.round
-                    }
-                );
-                charactersChanged = true;
-            }
-
-            if (skill.name === '疾風箭') {
-                await applyDebuffBundle(
-                    client,
-                    [targetId],
-                    ['dodge_down_50'],
-                    {
-                        sourceSkillKey: skill.key,
-                        sourceCharacterId: actorId,
-                        currentRound: battleState.round
-                    }
-                );
-                charactersChanged = true;
-            }
-
-            const attackHitModifierMatch = String(skill.effect).match(
-                /【命中([+-]\d+)】/
-            );
-            const attackHitModifier = attackHitModifierMatch
-                ? Number(attackHitModifierMatch[1])
-                : 0;
-
-            const defenseIgnoreMatch = String(skill.effect).match(
-                /無視\s*(\d+)%\s*(?:防禦|防禦和魔抗)/
-            );
-            const defenseIgnoreRate = defenseIgnoreMatch
-                ? clamp(Number(defenseIgnoreMatch[1]), 0, 100)
-                : 0;
-
-            const skillUnblockable =
-                String(skill.effect).includes('【無法格擋】') ||
-                String(skill.effect).includes('無法被格擋') ||
-                reactionFlags.unblockable === true;
-
-            const skillCannotEvade =
-                String(skill.effect).includes('【無法迴避】') ||
-                reactionFlags.cannotEvade === true;
-
-            const criticalDamageRate =
-                50 +
-                Math.max(0, Number(actor.crit_damage_bonus || 0)) +
-                Number(reactionFlags.critDamageBonus || 0);
-            const criticalMultiplier =
-                1 + criticalDamageRate / 100;
-
-            const meleeAttack = String(skill.effect).includes('近戰攻擊');
-            const empowerActive =
-                meleeAttack &&
-                actorMods.empowerMagic > 0 &&
-                packets.some(packet => packet.damageType === '物理');
-
-            let darknessAvailable = actorBuffKeys.has('darkness');
-            let darknessConsumed = false;
-            const targetSummaries = [];
-            const allTargetResults = [];
-            const allHealResults = [];
-            let grandTotalDamage = 0;
-            let grandHpLoss = 0;
-            let anyAttackHit = false;
-
-            for (const attackTarget of targetRows.rows) {
-                // 魂靈風息：同一路線上的友方改成恢復，不進攻擊判定。
-                if (
-                    skill.name === '魂靈風息' &&
-                    (attackTarget.kind || 'player') === (actor.kind || 'player')
-                ) {
-                    const oldHp = Number(attackTarget.hp);
-                    const effectiveMagic = Math.floor(
-                        Number(actor.matk) * actorMods.matkMult + actorMods.matkFlat
-                    );
-                    const heal = Math.max(1, Math.floor(effectiveMagic * 0.75));
-                    const newHp = Math.min(Number(attackTarget.max_hp), oldHp + heal);
-                    const actualHeal = Math.max(0, newHp - oldHp);
-
-                    if (actualHeal > 0) {
-                        await client.query(
-                            'UPDATE characters SET hp = $1 WHERE id = $2',
-                            [newHp, attackTarget.id]
-                        );
-                        charactersChanged = true;
-                    }
-
-                    targetSummaries.push(
-                        `✚ ${attackTarget.name} HP ${oldHp} → ${newHp}` +
-                        (actualHeal ? `（+${actualHeal}）` : '')
-                    );
-
-                    allHealResults.push({
-                        targetId: Number(attackTarget.id),
-                        targetName: attackTarget.name,
-                        heal: actualHeal,
-                        oldHp,
-                        newHp
-                    });
-                    continue;
-                }
-
-                const targetBuffEntriesNow = await getCharacterBuffEntries(
-                    client,
-                    attackTarget.id
-                );
-                const targetBuffKeysNow = new Set(
-                    targetBuffEntriesNow.map(row => row.buff_key)
-                );
-                const targetMods = buffModifiers(targetBuffEntriesNow);
-
-                const effectiveHit = Math.floor(
-                    Number(actor.hit_rate) +
-                    actorMods.hitFlat +
-                    attackHitModifier
-                );
-
-                const effectiveDodge = targetBuffKeysNow.has('frozen')
-                    ? 0
-                    : Math.floor(
-                        Number(attackTarget.dodge) *
-                        targetMods.dodgeMult +
-                        targetMods.dodgeFlat
-                    );
-
-                const effectiveCrit = Math.floor(
-                    Number(actor.crit) +
-                    actorMods.critFlat +
-                    Number(reactionFlags.critFlat || 0)
-                );
-
-                const hitThreshold = skillCannotEvade
-                    ? effectiveHit
-                    : effectiveHit - effectiveDodge;
-
-                const effectiveBlockRate = clamp(
-                    Number(attackTarget.block_rate || 0) + targetMods.blockFlat,
-                    0,
-                    75
-                );
-
-                const lines = [];
-                const segmentResults = [];
-                let rawTotalDamage = 0;
-                let segment = 0;
-                let anyHit = false;
-                let anyPhysicalAttack = false;
-                let anyBlock = false;
-                let mirageConsumed = false;
-                let bleedTriggerCount = 0;
-
-                const bleedingEntry = targetBuffEntriesNow.find(
-                    row => row.buff_key === 'bleeding'
-                );
-                let bleedLossPerHit = 0;
-                if (bleedingEntry?.source_character_id) {
-                    const bleedMagic = await sourceEffectiveMagic(
-                        client,
-                        bleedingEntry.source_character_id
-                    );
-                    bleedLossPerHit = Math.max(
-                        1,
-                        Math.floor(bleedMagic * 0.5)
-                    );
-                }
-
-                for (const packet of packets) {
-                    for (let i = 0; i < packet.hits; i++) {
-                        segment += 1;
-
-                        const roll = Math.floor(Math.random() * 100) + 1;
-                        let hit = roll <= hitThreshold;
-                        let forcedMissReason = '';
-
-                        // 黑暗：下一段攻擊必定無法命中。
-                        if (darknessAvailable) {
-                            hit = false;
-                            forcedMissReason = '黑暗';
-                            darknessAvailable = false;
-                            darknessConsumed = true;
-                        }
-
-                        // 幻影：下一次原本會命中的攻擊，直接迴避該段。
-                        if (
-                            hit &&
-                            !mirageConsumed &&
-                            targetBuffKeysNow.has('mirage')
-                        ) {
-                            hit = false;
-                            forcedMissReason = '幻影';
-                            mirageConsumed = true;
-                            await removeBuffKeys(
-                                client,
-                                attackTarget.id,
-                                ['mirage']
-                            );
-                            charactersChanged = true;
-                        }
-
-                        anyHit ||= hit;
-                        anyAttackHit ||= hit;
-
-                        const physical = packet.damageType === '物理';
-                        anyPhysicalAttack ||= physical;
-
-                        const canBlock =
-                            hit &&
-                            physical &&
-                            !skillUnblockable &&
-                            !actorMods.unblockable &&
-                            !targetMods.blockDisabled &&
-                            (targetMods.autoGuard || targetMods.guardReady);
-
-                        const blocked = Boolean(canBlock);
-                        anyBlock ||= blocked;
-
-                        // 被格擋的攻擊不能暴擊；魔法傷害本身無法格擋。
-                        const critical =
-                            hit &&
-                            !blocked &&
-                            reactionFlags.cannotCrit !== true &&
-                            roll <= effectiveCrit;
-
-                        let damage = 0;
-                        let bonusMagic = 0;
-
-                        if (hit) {
-                            const rawStat =
-                                packet.damageType === '魔法'
-                                    ? Number(actor.matk)
-                                    : Number(actor.patk);
-
-                            const attackMult =
-                                packet.damageType === '魔法'
-                                    ? actorMods.matkMult
-                                    : actorMods.patkMult;
-
-                            const attackFlat =
-                                packet.damageType === '魔法'
-                                    ? actorMods.matkFlat
-                                    : 0;
-
-                            const rawDefense =
-                                packet.damageType === '魔法'
-                                    ? Number(attackTarget.resist)
-                                    : Number(attackTarget.defense);
-
-                            const defenseMult =
-                                packet.damageType === '魔法'
-                                    ? targetMods.resistMult
-                                    : targetMods.defenseMult;
-
-                            const effectiveAttack = Math.floor(
-                                rawStat * attackMult + attackFlat
-                            );
-
-                            const ignoreDefenseForReaction =
-                                Number(reactionFlags.ignoreDefenseTargetId || 0) ===
-                                Number(attackTarget.id);
-
-                            const effectiveDefense = ignoreDefenseForReaction
-                                ? 0
-                                : Math.floor(
-                                    rawDefense *
-                                    defenseMult *
-                                    (1 - defenseIgnoreRate / 100)
-                                );
-
-                            const baseDamage = Math.floor(
-                                effectiveAttack * packet.multiplier
-                            );
-
-                            const blockFactor = blocked
-                                ? 1 - effectiveBlockRate / 100
-                                : 1;
-
-                            const allDamageModifier = Math.max(
-                                0,
-                                1 +
-                                (actorMods.damageMult - 1) +
-                                (targetMods.damageTakenMult - 1)
-                            );
-
-                            damage = Math.max(
-                                1,
-                                Math.floor(
-                                    baseDamage *
-                                    blockFactor *
-                                    allDamageModifier *
-                                    (critical ? criticalMultiplier : 1) -
-                                    effectiveDefense
-                                )
-                            );
-
-                            rawTotalDamage += damage;
-
-                            if (bleedLossPerHit > 0) {
-                                bleedTriggerCount += 1;
-                            }
-
-                            // 賦能：下一次物理近戰攻擊每一個命中段附加 0.5 魔法。
-                            if (empowerActive && physical) {
-                                const magicAttack = Math.floor(
-                                    Number(actor.matk) *
-                                    actorMods.matkMult +
-                                    actorMods.matkFlat
-                                );
-                                const magicResist = Math.floor(
-                                    Number(attackTarget.resist) *
-                                    targetMods.resistMult
-                                );
-
-                                const bonusDamageModifier = Math.max(
-                                    0,
-                                    1 +
-                                    (actorMods.damageMult - 1) +
-                                    (targetMods.damageTakenMult - 1)
-                                );
-
-                                bonusMagic = Math.max(
-                                    1,
-                                    Math.floor(
-                                        magicAttack *
-                                        actorMods.empowerMagic *
-                                        bonusDamageModifier *
-                                        (critical ? criticalMultiplier : 1) -
-                                        magicResist
-                                    )
-                                );
-
-                                rawTotalDamage += bonusMagic;
-                            }
-                        }
-
-                        const blockText = blocked
-                            ? `・格擋${effectiveBlockRate}%`
-                            : '';
-                        const bonusText = bonusMagic
-                            ? `＋賦能魔法 ${bonusMagic}`
-                            : '';
-                        const forcedMissText = forcedMissReason
-                            ? `（${forcedMissReason}）`
-                            : '';
-
-                        lines.push(
-                            `第${segment}段 🎲 ${roll}/${hitThreshold} → ` +
-                            (
-                                hit
-                                    ? (
-                                        critical
-                                            ? `暴擊 ${damage}${bonusText}`
-                                            : `命中 ${damage}${blockText}${bonusText}`
-                                    )
-                                    : `未命中${forcedMissText}`
-                            )
-                        );
-
-                        segmentResults.push({
-                            segment,
-                            roll,
-                            hitThreshold,
-                            hit,
-                            forcedMissReason,
-                            blocked,
-                            blockRate: blocked ? effectiveBlockRate : 0,
-                            critical,
-                            damage,
-                            bonusMagic,
-                            damageType: packet.damageType
-                        });
-                    }
-                }
-
-                // 攻擊指定時的反應，直接作用在本次攻擊的傷害段。
-                const negateAllForThisTarget =
-                    Number(reactionFlags.negateAllDamageTargetId || 0) ===
-                    Number(attackTarget.id);
-
-                const negateOneForThisTarget =
-                    Number(reactionFlags.negateOneSegmentTargetId || 0) ===
-                    Number(attackTarget.id);
-
-                if (negateAllForThisTarget) {
-                    for (const result of segmentResults) {
-                        if (!result.hit) continue;
-                        result.reactionPreventedDamage =
-                            Number(result.damage || 0) +
-                            Number(result.bonusMagic || 0);
-                        result.damage = 0;
-                        result.bonusMagic = 0;
-                    }
-                    lines.push('反應效果：本次攻擊傷害無效');
-                } else if (negateOneForThisTarget) {
-                    const firstHit = segmentResults.find(item => item.hit);
-                    if (firstHit) {
-                        firstHit.reactionPreventedDamage =
-                            Number(firstHit.damage || 0) +
-                            Number(firstHit.bonusMagic || 0);
-                        firstHit.damage = 0;
-                        firstHit.bonusMagic = 0;
-                        lines.push(`反應效果：第${firstHit.segment}段傷害無效`);
-                    }
-                }
-
-                // 依「每一段傷害」順序結算護盾 / 狂暴 / 死鬥，
-                // 避免多段攻擊被錯誤視為一筆總傷害。
-                const shieldEntry = targetBuffEntriesNow.find(
-                    row => row.buff_key === 'life_shield'
-                );
-                const shieldBefore =
-                    shieldEntry?.value_num === null ||
-                    shieldEntry?.value_num === undefined
-                        ? 0
-                        : Number(shieldEntry.value_num);
-
-                const oldHp = Number(attackTarget.hp);
-                let runningHp = oldHp;
-                let shieldAfter = shieldBefore;
-                let shieldAbsorbed = 0;
-                let hpDamage = 0;
-                let berserkTriggered = false;
-                let duelPrevented = false;
-                let berserkAvailable = targetBuffKeysNow.has('berserk');
-                const duelActive = targetBuffKeysNow.has('duel');
-
-                for (const result of segmentResults) {
-                    if (!result.hit) continue;
-
-                    let segmentDamage =
-                        Number(result.damage || 0) +
-                        Number(result.bonusMagic || 0);
-
-                    if (segmentDamage <= 0) continue;
-
-                    if (shieldAfter > 0) {
-                        const absorbed = Math.min(
-                            shieldAfter,
-                            segmentDamage
-                        );
-                        shieldAfter -= absorbed;
-                        segmentDamage -= absorbed;
-                        shieldAbsorbed += absorbed;
-                    }
-
-                    if (segmentDamage <= 0) continue;
-
-                    // 狂暴針對「下一次會致死的傷害段」：
-                    // 該段傷害改為 0，之後的攻擊段仍正常結算。
-                    if (
-                        berserkAvailable &&
-                        runningHp - segmentDamage <= 0
-                    ) {
-                        berserkAvailable = false;
-                        berserkTriggered = true;
-                        result.berserkPreventedDamage = segmentDamage;
-                        segmentDamage = 0;
-                    }
-
-                    if (segmentDamage <= 0) continue;
-
-                    const beforeSegmentHp = runningHp;
-                    runningHp = Math.max(
-                        duelActive ? 1 : 0,
-                        runningHp - segmentDamage
-                    );
-
-                    const actualSegmentLoss = Math.max(
-                        0,
-                        beforeSegmentHp - runningHp
-                    );
-                    hpDamage += actualSegmentLoss;
-
-                    if (
-                        duelActive &&
-                        beforeSegmentHp - segmentDamage < 1
-                    ) {
-                        duelPrevented = true;
-                        result.duelPreventedDamage =
-                            Math.max(
-                                0,
-                                segmentDamage - actualSegmentLoss
-                            );
-                    }
-                }
-
-                if (shieldBefore > 0) {
-                    if (shieldAfter > 0) {
-                        await client.query(`
-                            UPDATE character_buffs
-                            SET value_num = $1
-                            WHERE character_id = $2
-                              AND buff_key = 'life_shield'
-                        `, [shieldAfter, attackTarget.id]);
-                    } else {
-                        await removeBuffKeys(
-                            client,
-                            attackTarget.id,
-                            ['life_shield']
-                        );
-                    }
-
-                    if (shieldAfter !== shieldBefore) {
-                        charactersChanged = true;
-                    }
-                }
-
-                if (berserkTriggered) {
-                    await removeBuffKeys(
-                        client,
-                        attackTarget.id,
-                        ['berserk']
-                    );
-                    charactersChanged = true;
-                }
-
-                const newHp = runningHp;
-
-                if (newHp !== oldHp) {
-                    await client.query(
-                        'UPDATE characters SET hp = $1 WHERE id = $2',
-                        [newHp, attackTarget.id]
-                    );
-                    charactersChanged = true;
-                }
-
-                // 流血屬於「額外損失 HP」，不走防禦 / 魔抗 / 護盾。
-                let bleedLoss = 0;
-                if (bleedTriggerCount > 0 && bleedLossPerHit > 0) {
-                    const bleedResult = await applyDirectHpLoss(
-                        client,
-                        attackTarget.id,
-                        bleedLossPerHit * bleedTriggerCount
-                    );
-                    bleedLoss = bleedResult.loss;
-                    if (bleedLoss > 0) charactersChanged = true;
-                }
-
-                // 基礎格擋保留到下一次物理攻擊。
-                if (
-                    anyPhysicalAttack &&
-                    targetBuffKeysNow.has('guard_ready')
-                ) {
-                    await removeBuffKeys(
-                        client,
-                        attackTarget.id,
-                        ['guard_ready']
-                    );
-                    charactersChanged = true;
-                }
-
-                // 障壁 / 易傷等「下一次受傷」效果。
-                if (
-                    hpDamage > 0 &&
-                    targetMods.consumeOnDamageKeys.length
-                ) {
-                    await removeBuffKeys(
-                        client,
-                        attackTarget.id,
-                        targetMods.consumeOnDamageKeys
-                    );
-                    charactersChanged = true;
-                }
-
-                // 冰凍：受到真正 HP 傷害後解除；若護盾全擋住則不算受到傷害。
-                if (
-                    hpDamage > 0 &&
-                    targetBuffKeysNow.has('frozen')
-                ) {
-                    await removeBuffKeys(
-                        client,
-                        attackTarget.id,
-                        ['frozen']
-                    );
-                    charactersChanged = true;
-                }
-
-                // 命中時施加異常 / 數值減益；庇護會擋住整組減益。
-                const hitDebuffs = [
-                    ...onHitDebuffKeys(skill)
-                ];
-
-                if (
-                    anyHit &&
-                    (
-                        actorMods.applyBlockSealOnHit ||
-                        reactionFlags.applyBlockSealOnHit === true
-                    )
-                ) {
-                    hitDebuffs.push('block_seal');
-                }
-
-                if (
-                    anyHit &&
-                    reactionFlags.applyBleedOnHit === true
-                ) {
-                    hitDebuffs.push('bleeding');
-                }
-
-                if (anyHit && hitDebuffs.length) {
-                    const applied = await applyDebuffBundle(
-                        client,
-                        [attackTarget.id],
-                        hitDebuffs,
-                        {
-                            sourceSkillKey: skill.key,
-                            sourceCharacterId: actorId,
-                            currentRound: battleState.round
-                        }
-                    );
-
-                    if (
-                        applied.applied.length ||
-                        applied.protected.length
-                    ) {
-                        charactersChanged = true;
-                    }
-
-                    if (
-                        applied.applied.some(
-                            item => Boolean(
-                                BUFF_CATALOG[item.key]?.modifiers?.speedFlat
-                            )
-                        )
-                    ) {
-                        initiativeChanged = true;
-                    }
-
-                    if (applied.applied.length) {
-                        const names = [...new Set(
-                            applied.applied.map(
-                                item => BUFF_CATALOG[item.key]?.name || item.key
-                            )
-                        )];
-                        lines.push(`命中效果：施加【${names.join('】、【')}】`);
-                    }
-
-                    if (applied.protected.length) {
-                        lines.push('【庇護】發動：本次命中附帶的減益無效');
-                    }
-
-                    if (applied.resisted.length) {
-                        lines.push('【抗性】已有相同抗性狀態，本次不再生效');
-                    }
-                }
-
-                // 鋒銳：命中後施加流血。
-                if (anyHit && actorMods.applyBleedOnHit) {
-                    const applied = await applyDebuffBundle(
-                        client,
-                        [attackTarget.id],
-                        ['bleeding'],
-                        {
-                            sourceSkillKey: skill.key,
-                            sourceCharacterId: actorId,
-                            currentRound: battleState.round
-                        }
-                    );
-                    if (applied.applied.length || applied.protected.length) {
-                        charactersChanged = true;
-                    }
-                    if (applied.applied.length) {
-                        lines.push('鋒銳：施加【流血】');
-                    }
-                    if (applied.protected.length) {
-                        lines.push('【庇護】發動：流血無效');
-                    }
-                }
-
-                const finalHpRow = await client.query(
-                    'SELECT hp FROM characters WHERE id = $1',
-                    [attackTarget.id]
-                );
-                const finalHp = Number(finalHpRow.rows[0]?.hp ?? newHp);
-
-                const effectLines = [];
-                if (shieldAbsorbed > 0) {
-                    effectLines.push(
-                        `護盾吸收 ${shieldAbsorbed}（${shieldBefore} → ${shieldAfter}）`
-                    );
-                }
-                if (bleedLoss > 0) {
-                    effectLines.push(`【流血】額外損失 ${bleedLoss} HP`);
-                }
-                if (berserkTriggered) {
-                    effectLines.push('【狂暴】發動：本次致死傷害改為 0');
-                }
-                if (duelPrevented) {
-                    effectLines.push('【死鬥】發動：HP 保留在 1');
-                }
-                if (anyBlock) {
-                    effectLines.push(`格擋率 ${effectiveBlockRate}% 生效`);
-                }
-
-                grandTotalDamage += rawTotalDamage;
-                grandHpLoss += Math.max(0, oldHp - finalHp);
-
-                targetSummaries.push(
-                    `⚔ ${attackTarget.name} HP ${oldHp} → ${finalHp}` +
-                    (effectLines.length ? `\n${effectLines.join('；')}` : '') +
-                    `\n${lines.join('\n')}`
-                );
-
-                allTargetResults.push({
-                    targetId: Number(attackTarget.id),
-                    targetName: attackTarget.name,
-                    targetSnapshot: {
-                        id: Number(attackTarget.id),
-                        name: attackTarget.name,
-                        kind: attackTarget.kind || 'player'
-                    },
-                    hitThreshold,
-                    effectiveHit,
-                    effectiveDodge,
-                    effectiveCrit,
-                    rawTotalDamage,
-                    hpLoss: Math.max(0, oldHp - finalHp),
-                    oldHp,
-                    newHp: finalHp,
-                    shieldAbsorbed,
-                    bleedLoss,
-                    berserkTriggered,
-                    duelPrevented,
-                    packets: segmentResults
-                });
-            }
-
-            if (darknessConsumed) {
-                await removeBuffKeys(
-                    client,
-                    actorId,
-                    ['darkness']
-                );
-                charactersChanged = true;
-            }
-
-            // 下一次攻擊型 Buff 在整個戰技結束後消耗一次。
-            const attackConsumeKeys = [
-                ...actorMods.consumeOnAttackKeys
-            ];
-            if (empowerActive) attackConsumeKeys.push('empower');
-            if (actorBuffKeys.has('sharpness')) {
-                attackConsumeKeys.push('sharpness');
-            }
-
-            if (attackConsumeKeys.length) {
-                await removeBuffKeys(
-                    client,
-                    actorId,
-                    attackConsumeKeys
-                );
-                charactersChanged = true;
-            }
-
-            // 防禦斬：攻擊後自身本輪防禦 +25%。
-            if (skill.name === '防禦斬') {
-                await applyBuffToCharacters(
-                    client,
-                    [actorId],
-                    'defense_stance',
-                    {
-                        sourceSkillKey: skill.key,
-                        sourceCharacterId: actorId,
-                        expiresRound: battleState.round
-                    }
-                );
-                charactersChanged = true;
-            }
-
-            const targetLabel =
-                allTargetResults.length > 1
-                    ? `${allTargetResults.length} 名敵方`
-                    : allTargetResults[0]?.targetName || target.name;
-
-            content =
-                `⚔ ${actor.name} 使用「${skill.name}」→ ${targetLabel}\n` +
-                (
-                    targetSummaries.length
-                        ? targetSummaries.join('\n\n')
-                        : '沒有可結算的攻擊目標'
-                );
-
-            payload = {
-                ...payload,
-                targetIds: attackTargetIds,
-                heals: allHealResults,
-                totalDamage: grandTotalDamage,
-                totalHpLoss: grandHpLoss,
-                targets: allTargetResults,
-                battleLogContent:
-                    `${actor.name} 使用「${skill.name}」攻擊 ${targetLabel}。\n` +
-                    (
-                        targetSummaries.length
-                            ? targetSummaries.join('\n')
-                            : '沒有造成傷害。'
-                    )
-            };
-        } else if (skill.actionCode === 'HEAL') {
-            const recipientIds = await autoRecipientIds(
-                client,
-                actor,
-                target,
-                skill
-            );
-
-            const recipientResult = await client.query(`
-                SELECT *
-                FROM characters
-                WHERE id = ANY($1::int[])
-                ORDER BY id
-                FOR UPDATE
-            `, [recipientIds]);
-
-            const actorBuffResult = await client.query(`
-                SELECT buff_key, stack_count, value_num
-                FROM character_buffs
-                WHERE character_id = $1
-            `, [actorId]);
-
-            const actorMods = buffModifiers(actorBuffResult.rows);
-            const effectiveMagic = Math.floor(
-                Number(actor.matk) *
-                actorMods.matkMult +
-                actorMods.matkFlat
-            );
-
-            const resultLines = [];
-            const healResults = [];
-            let totalHeal = 0;
-
-            for (const recipient of recipientResult.rows) {
-                const oldHp = Number(recipient.hp);
-                let newHp = oldHp;
-                let heal = 0;
-
-                if (skill.logicCode === 'REVIVE_ONE') {
-                    if (oldHp <= 0) {
-                        newHp = Math.min(Number(recipient.max_hp), 1);
-                        heal = Math.max(0, newHp - oldHp);
-                    }
-                } else if (skill.logicCode === 'LIFE_TRANSFER') {
-                    const transfer = Math.max(
-                        0,
-                        Math.floor(Number(actor.hp) * 0.5)
-                    );
-
-                    const actorHasDuel = actorBuffResult.rows.some(
-                        row => row.buff_key === 'duel'
-                    );
-                    const actorNewHp = Math.max(
-                        actorHasDuel ? 1 : 0,
-                        Number(actor.hp) - transfer
-                    );
-
-                    newHp = Math.min(
-                        Number(recipient.max_hp),
-                        oldHp + transfer
-                    );
-
-                    heal = Math.max(0, newHp - oldHp);
-
-                    await client.query(
-                        'UPDATE characters SET hp = $1 WHERE id = $2',
-                        [actorNewHp, actorId]
-                    );
-                    actor.hp = actorNewHp;
-                    charactersChanged = true;
-                } else {
-                    const magic = String(skill.effect).match(
-                        /恢復[^【]*【([0-9.]+)(物理|魔法)】/
-                    );
-                    const percentHp = String(skill.effect).match(
-                        /恢復(?:其|自身)?\s*([0-9.]+)%HP/
-                    );
-
-                    if (magic) {
-                        const stat =
-                            magic[2] === '物理'
-                                ? Math.floor(
-                                    Number(actor.patk) *
-                                    actorMods.patkMult
-                                )
-                                : effectiveMagic;
-
-                        heal = Math.max(
-                            1,
-                            Math.floor(stat * Number(magic[1]))
-                        );
-                    } else if (percentHp) {
-                        heal = Math.max(
-                            1,
-                            Math.floor(
-                                Number(recipient.max_hp) *
-                                Number(percentHp[1]) /
-                                100
-                            )
-                        );
-                    }
-
-                    newHp = Math.min(
-                        Number(recipient.max_hp),
-                        oldHp + heal
-                    );
-                    heal = Math.max(0, newHp - oldHp);
-                }
-
-                if (newHp !== oldHp) {
-                    await client.query(
-                        'UPDATE characters SET hp = $1 WHERE id = $2',
-                        [newHp, recipient.id]
-                    );
-                    charactersChanged = true;
-                }
-
-                if (skill.logicCode === 'CLEANSE_HEAL') {
-                    const debuffRows = await client.query(`
-                        SELECT buff_key
-                        FROM character_buffs
-                        WHERE character_id = $1
-                    `, [recipient.id]);
-
-                    const debuffKeys = debuffRows.rows
-                        .map(row => row.buff_key)
-                        .filter(key => BUFF_CATALOG[key]?.kind === 'debuff');
-
-                    if (debuffKeys.length) {
-                        await removeBuffKeys(
-                            client,
-                            recipient.id,
-                            debuffKeys
-                        );
-                        charactersChanged = true;
-                    }
-                }
-
-                totalHeal += heal;
-                healResults.push({
-                    targetId: Number(recipient.id),
-                    targetName: recipient.name,
-                    heal,
-                    oldHp,
-                    newHp
-                });
-                resultLines.push(
-                    `${recipient.name} HP ${oldHp} → ${newHp}` +
-                    (heal ? `（+${heal}）` : '')
-                );
-            }
-
-            const recipientLabel =
-                recipientResult.rows.length > 1
-                    ? `${recipientResult.rows.length} 名友方`
-                    : recipientResult.rows[0]?.name || target.name;
-
-            content =
-                `✚ ${actor.name} 使用「${skill.name}」→ ${recipientLabel}\n` +
-                (
-                    resultLines.length
-                        ? resultLines.join('\n')
-                        : `目前沒有符合條件的恢復目標。\n${skill.effect}`
-                );
-
-            payload = {
-                ...payload,
-                recipientIds,
-                heals: healResults,
-                totalHeal,
-                battleLogContent:
-                    `${actor.name} 使用「${skill.name}」對 ${recipientLabel} 進行恢復。` +
-                    (resultLines.length ? `\n${resultLines.join('\n')}` : '')
-            };
-        } else if (
-            skill.actionCode === 'BUFF' ||
-            skill.actionCode === 'DEBUFF' ||
-            skill.actionCode === 'GUARD' ||
-            (skill.actionCode === 'UTILITY' && autoBuffForSkill(skill))
-        ) {
-            const buffKey =
-                skill.logicCode === 'BASIC_GUARD'
-                    ? 'guard_ready'
-                    : autoBuffForSkill(skill);
-
-            if (!buffKey) {
-                content =
-                    `◆ ${actor.name} 使用「${skill.name}」→ ${target.name}\n` +
-                    `${skill.effect}\n` +
-                    `效果已記錄；此效果目前尚未建立可計算的 Buff 定義。`;
-
-                payload.battleLogContent =
-                    `${actor.name} 對 ${target.name} 使用「${skill.name}」。${skill.effect}`;
-            } else if (skill.logicCode === 'LIFE_SHIELD') {
-                const hpCost = Math.max(
-                    1,
-                    Math.floor(Number(actor.max_hp) * 0.25)
-                );
-                const oldHp = Number(actor.hp);
-                const actorHasDuel = actorBuffEntries.some(
-                    row => row.buff_key === 'duel'
-                );
-                const newHp = Math.max(
-                    actorHasDuel ? 1 : 0,
-                    oldHp - hpCost
-                );
-                const shieldValue = Math.max(0, oldHp - newHp);
-
-                await client.query(
-                    'UPDATE characters SET hp = $1 WHERE id = $2',
-                    [newHp, actorId]
-                );
-
-                await applyBuffToCharacters(
-                    client,
-                    [actorId],
-                    'life_shield',
-                    {
-                        sourceSkillKey: skill.key,
-                        sourceCharacterId: actorId,
-                        expiresRound: battleState.round,
-                        valueNum: shieldValue
-                    }
-                );
-
-                charactersChanged = true;
-
-                content =
-                    `⬆ ${actor.name} 使用「生命護盾」\n` +
-                    `HP ${oldHp} → ${newHp}\n` +
-                    `獲得 ${shieldValue} 點護盾`;
-
-                payload = {
-                    ...payload,
-                    shieldValue,
-                    oldHp,
-                    newHp,
-                    battleLogContent:
-                        `${actor.name} 使用「生命護盾」，消耗 ${hpCost} HP，獲得 ${shieldValue} 點護盾。`
-                };
-            } else if (skill.logicCode === 'LIGHT_LINK') {
-                const beforeLinkMods = buffModifiers(actorBuffEntries);
-                const beforeLinkMagic = Math.floor(
-                    Number(actor.matk) * beforeLinkMods.matkMult +
-                    beforeLinkMods.matkFlat
-                );
-                const afterLinkMagic = Math.floor(
-                    Number(actor.matk) *
-                    Math.max(0, beforeLinkMods.matkMult - 0.5) +
-                    beforeLinkMods.matkFlat
-                );
-                const lostMagic = Math.max(
-                    0,
-                    beforeLinkMagic - afterLinkMagic
-                );
-
-                await client.query(`
-                    DELETE FROM character_buffs
-                    WHERE buff_key = 'light_link_target'
-                      AND source_character_id = $1
-                `, [actorId]);
-
-                await applyBuffToCharacters(
-                    client,
-                    [actorId],
-                    'light_link_source',
-                    {
-                        sourceSkillKey: skill.key,
-                        sourceCharacterId: actorId,
-                        expiresRound: battleState.round
-                    }
-                );
-
-                await applyBuffToCharacters(
-                    client,
-                    [targetId],
-                    'light_link_target',
-                    {
-                        sourceSkillKey: skill.key,
-                        sourceCharacterId: actorId,
-                        expiresRound: battleState.round,
-                        valueNum: lostMagic
-                    }
-                );
-
-                charactersChanged = true;
-
-                content =
-                    `⬆ ${actor.name} 使用「熠光連結」→ ${target.name}\n` +
-                    `${actor.name} 魔法攻擊 -50%\n` +
-                    `${target.name} 魔法攻擊 +${lostMagic}`;
-
-                payload = {
-                    ...payload,
-                    lostMagic,
-                    battleLogContent:
-                        `${actor.name} 使用「熠光連結」連結 ${target.name}：` +
-                        `${actor.name} 魔法攻擊 -50%，${target.name} 魔法攻擊 +${lostMagic}。`
-                };
-            } else {
-                let recipientIds;
-
-                // 狂暴 / 假死 / 死鬥的狀態實際施加在自己身上。
-                if (['狂暴', '假死', '死鬥'].includes(skill.name)) {
-                    recipientIds = [actorId];
-                } else {
-                    recipientIds = await autoRecipientIds(
-                        client,
-                        actor,
-                        target,
-                        skill
-                    );
-                }
-
-                const expiresRound =
-                    ['stun', 'darkness', 'frozen', 'feign_death', 'berserk'].includes(buffKey)
-                        ? battleState.round + 1
-                        : skillBuffExpiresRound(skill, battleState.round);
-
-                const definition = BUFF_CATALOG[buffKey];
-                let application = {
-                    applied: [],
-                    protected: [],
-                    resisted: []
-                };
-
-                const valueNum =
-                    skill.name === '死鬥'
-                        ? Number(targetId)
-                        : null;
-
-                if (
-                    definition.kind === 'debuff' ||
-                    definition.kind === 'special' ||
-                    definition.resistance
-                ) {
-                    // 狂暴、死鬥等 special 不會被庇護擋；applyDebuffBundle
-                    // 只會在 keys 中真的存在 debuff 時消耗庇護。
-                    application = await applyDebuffBundle(
-                        client,
-                        recipientIds,
-                        [buffKey],
-                        {
-                            sourceSkillKey: skill.key,
-                            sourceCharacterId: actorId,
-                            currentRound: battleState.round
-                        }
-                    );
-
-                    // 死鬥要記住指定的敵人，供輪結束時判定代價。
-                    if (skill.name === '死鬥' && application.applied.length) {
-                        await client.query(`
-                            UPDATE character_buffs
-                            SET value_num = $1,
-                                expires_round = $2
-                            WHERE character_id = $3
-                              AND buff_key = 'duel'
-                        `, [valueNum, battleState.round, actorId]);
-                    }
-                } else {
-                    await applyBuffToCharacters(
-                        client,
-                        recipientIds,
-                        buffKey,
-                        {
-                            sourceSkillKey: skill.key,
-                            sourceCharacterId: actorId,
-                            expiresRound,
-                            valueNum
-                        }
-                    );
-
-                    application.applied = recipientIds.map(
-                        characterId => ({ characterId, key: buffKey })
-                    );
-                }
-
-                charactersChanged =
-                    charactersChanged ||
-                    application.applied.length > 0 ||
-                    application.protected.length > 0;
-
-                // 挑釁還有「本輪行動速度 -10」，是獨立減益圖標。
-                if (
-                    skill.name === '挑釁' &&
-                    application.protected.length === 0
-                ) {
-                    const speedResult = await applyDebuffBundle(
-                        client,
-                        recipientIds,
-                        ['speed_down_10'],
-                        {
-                            sourceSkillKey: skill.key,
-                            sourceCharacterId: actorId,
-                            currentRound: battleState.round
-                        }
-                    );
-                    if (speedResult.applied.length) {
-                        charactersChanged = true;
-                        initiativeChanged = true;
-                    }
-                }
-
-                // 視線轉移：本輪目標迴避 -50%。
-                if (skill.name === '視線轉移') {
-                    initiativeChanged = false;
-                }
-
-                // 有些狀態同時有立即資源效果。
-                if (skill.name === '防守姿態') {
-                    await client.query(
-                        'UPDATE characters SET sp = sp + 1 WHERE id = $1',
-                        [actorId]
-                    );
-                    charactersChanged = true;
-                }
-
-                if (skill.name === '進攻架勢') {
-                    await client.query(
-                        'UPDATE characters SET ap = ap + 1 WHERE id = $1',
-                        [actorId]
-                    );
-                    charactersChanged = true;
-                }
-
-                if (skill.name === '狂暴') {
-                    await client.query(
-                        'UPDATE characters SET ap = ap + 1 WHERE id = $1',
-                        [actorId]
-                    );
-                    charactersChanged = true;
-                }
-
-                const recipientNamesResult = await client.query(`
-                    SELECT name
-                    FROM characters
-                    WHERE id = ANY($1::int[])
-                    ORDER BY id
-                `, [recipientIds]);
-
-                const recipientNames = recipientNamesResult.rows.map(
-                    row => row.name
-                );
-                const recipientLabel =
-                    recipientNames.length > 3
-                        ? `${recipientNames.length} 名角色`
-                        : recipientNames.join('、') || target.name;
-
-                const statusLines = [];
-
-                if (application.protected.length) {
-                    statusLines.push('【庇護】發動：本次減益無效');
-                }
-
-                if (application.resisted.length) {
-                    statusLines.push('【抗性】同一狀態本場戰鬥已生效過，本次無效');
-                }
-
-                const appliedLabel =
-                    application.applied.length
-                        ? `${definition.name}：${definition.effect}`
-                        : `${definition.name}未生效`;
-
-                content =
-                    `${definition.kind === 'debuff' ? '⬇' : '⬆'} ` +
-                    `${actor.name} 使用「${skill.name}」→ ${recipientLabel}\n` +
-                    `${appliedLabel}` +
-                    (statusLines.length ? `\n${statusLines.join('\n')}` : '') +
-                    (
-                        application.applied.length && expiresRound
-                            ? `\n持續至第 ${expiresRound} 輪結束或效果提前觸發`
-                            : ''
-                    );
-
-                payload = {
-                    ...payload,
-                    buffKey,
-                    recipientIds,
-                    application,
-                    battleLogContent:
-                        `${actor.name} 使用「${skill.name}」→ ${recipientLabel}。` +
-                        ` ${appliedLabel}。` +
-                        (statusLines.length ? ` ${statusLines.join('；')}。` : '')
-                };
-
-                const m = definition.modifiers || {};
-                initiativeChanged =
-                    initiativeChanged ||
-                    Boolean(m.speedFlat) ||
-                    Boolean(m.initiativeFirst);
-            }
-        } else if (skill.actionCode === 'MOVE') {
-            if (skill.name === '移位' || skill.name === '快速移位') {
-                if ((actor.kind || 'player') !== (target.kind || 'player')) {
-                    throw new Error('交換位置只能指定友方');
-                }
-                if (Number(actor.id) === Number(target.id)) {
-                    throw new Error('交換位置必須指定另一名友方');
-                }
-
-                const swap = await swapCharacterPositions(
-                    client,
-                    actor.id,
-                    target.id
-                );
-
-                if (skill.name === '移位') {
-                    await applyBuffToCharacters(
-                        client,
-                        [actor.id, target.id],
-                        'dodge_up_30',
-                        {
-                            sourceSkillKey: skill.key,
-                            sourceCharacterId: actor.id,
-                            expiresRound: battleState.round
-                        }
-                    );
-                    charactersChanged = true;
-                }
-
-                content =
-                    `↔ ${actor.name} 使用「${skill.name}」與 ${target.name} 交換位置` +
-                    (
-                        skill.name === '移位'
-                            ? `\n雙方本輪迴避 +30`
-                            : `\n位置已立即互換；代受效果需在被攻擊指定時使用`
-                    );
-
-                payload = {
-                    ...payload,
-                    swapped: true,
-                    swap,
-                    battleLogContent:
-                        `${actor.name} 使用「${skill.name}」與 ${target.name} 交換戰場位置。` +
-                        (
-                            skill.name === '移位'
-                                ? ' 雙方本輪迴避 +30。'
-                                : ' 快速移位的代受效果需在被攻擊指定時使用。'
-                        )
-                };
-
-                io.emit('battlefield:changed', {
-                    reason: 'swap',
-                    firstCharacterId: Number(actor.id),
-                    secondCharacterId: Number(target.id)
-                });
-            } else {
-                content =
-                    `↔ ${actor.name} 使用「${skill.name}」\n${skill.effect}\n` +
-                    `此移動戰技已記錄；需要指定空格的效果可直接拖曳角色完成。`;
-                payload.battleLogContent =
-                    `${actor.name} 使用「${skill.name}」。${skill.effect}`;
-            }
+        const timingDeps = buildTimingEngineDeps(client, {
+            actor,
+            target,
+            skill,
+            actorId,
+            targetId,
+            battleState,
+            reactionFlags,
+            requestedDirection,
+            actorBuffEntries,
+            targetBuffEntries,
+            cost,
+            payload,
+            costAlreadySpent: Boolean(reactionFlags.costSpent)
+        });
+
+        let engineResult;
+        if (reactionResumeId) {
+            let stack = await loadFlowStack(client);
+            engineResult = await combat.resumeSkill(client, stack, {
+                flags: reactionFlags,
+                targetId,
+                pickedTargetId: number(req.body.pickedTargetId, 0) || null,
+                advanceIndex: true
+            }, timingDeps);
         } else {
-            content =
-                `◆ ${actor.name} 使用「${skill.name}」→ ${target.name}\n` +
-                `${skill.effect}\n` +
-                `目前已完成目標限制與資源消耗，特殊效果仍以戰鬥紀錄為準。`;
-
-            payload.battleLogContent =
-                `${actor.name} 對 ${target.name} 使用「${skill.name}」。${skill.effect}`;
-        }
-
-        if (actionStatus.lines.length) {
-            content += `\n${actionStatus.lines.join('\n')}`;
-            payload.battleLogContent =
-                `${payload.battleLogContent || content}\n${actionStatus.lines.join('\n')}`;
-        }
-
-        const postReactionOptions =
-            await collectPostActionReactionOptions(
-                client,
-                actor,
+            await clearFlowStack(client);
+            engineResult = await combat.startSkill(client, {
                 skill,
-                payload,
-                cost
-            );
+                actor,
+                target,
+                battleState,
+                direction: requestedDirection,
+                flags: { ...reactionFlags }
+            }, timingDeps);
+        }
 
-        let postReactionWindow = null;
+        await saveFlowStack(client, engineResult.stack || []);
+        if (timingDeps.state.cost) cost = timingDeps.state.cost;
 
-        if (postReactionOptions.length) {
-            postReactionWindow = await createReactionWindow(
-                client,
-                {
-                    triggerType: 'post_action',
-                    blocking: false,
-                    sourceActorId: actor.id,
-                    sourceTargetId: target.id,
-                    sourceSkillKey: skill.key,
-                    round: battleState.round,
-                    turnPass: battleState.turnPass,
-                    context: {
-                        actorId: Number(actor.id),
-                        actorName: actor.name,
-                        skillName: skill.name,
-                        actionCode: skill.actionCode,
-                        cost,
-                        targets: payload.targets || [],
-                        heals: payload.heals || []
-                    },
-                    options: postReactionOptions
+        content = timingDeps.state.content || engineResult.content || '';
+        let battlefieldChanged = false;
+        payload = {
+            ...payload,
+            ...(timingDeps.state.payload || {}),
+            pickRequest: engineResult.pickRequest || null,
+            timingPaused: Boolean(engineResult.paused),
+            skillFlow: (combat.topFrame(engineResult.stack || []) || {}).context?.meta?.skillFlow || []
+        };
+        charactersChanged = charactersChanged || timingDeps.state.charactersChanged;
+        battlefieldChanged = battlefieldChanged || timingDeps.state.battlefieldChanged;
+        initiativeChanged = initiativeChanged || timingDeps.state.initiativeChanged;
+
+        if (engineResult.pickRequest) {
+            const pickMessage = await insertChatMessage(client, {
+                channel: 'combat',
+                messageType: 'timing_pick',
+                characterId: actor.id,
+                characterName: actor.name,
+                characterKind: actor.kind || 'player',
+                content: engineResult.pickRequest.prompt || '請選擇適用目標',
+                payload: {
+                    pickRequest: engineResult.pickRequest,
+                    skillKey: skill.key
                 }
+            });
+            await client.query('COMMIT');
+            io.emit('chat:message', pickMessage);
+            io.emit('combat:timing-pick', engineResult.pickRequest);
+            return res.json({
+                success: true,
+                pendingPick: true,
+                pickRequest: engineResult.pickRequest,
+                message: pickMessage
+            });
+        }
+
+        if (engineResult.paused && engineResult.openedWindows?.length) {
+            const reactionWindows = engineResult.openedWindows;
+            const reactionWindow = reactionWindows[0];
+            // Chat only announces the timing wait ??option names live in the UI panel.
+            // Listing「誰的快速解咒」here made it look like the reaction already fired.
+            const waitLine =
+                `${combat.timingLabel(reactionWindow.triggerType)} ・等待反應`;
+
+            // Post damage / skill progress from this step before the wait prompt.
+            const progressContent = String(content || '').trim();
+            let progressMessage = null;
+            if (progressContent) {
+                progressMessage = await insertChatMessage(client, {
+                    channel: 'combat',
+                    messageType: 'skill',
+                    characterId: actor.id,
+                    characterName: actor.name,
+                    characterKind: actor.kind || 'player',
+                    content: progressContent,
+                    payload: {
+                        ...payload,
+                        reactionWindowId: reactionWindow.id,
+                        reactionBatchId: reactionWindow.batchId,
+                        partial: true
+                    }
+                });
+            }
+
+            const declareText = reactionResumeId || progressContent
+                ? waitLine
+                : `◆ ${actor.name} 使用「${skill.name}」→ ${target.name}\n${waitLine}`;
+
+            const declarationMessage = await insertChatMessage(client, {
+                channel: 'combat',
+                messageType: progressContent ? 'reaction_prompt' : 'attack_declare',
+                characterId: actor.id,
+                characterName: actor.name,
+                characterKind: actor.kind || 'player',
+                content: declareText,
+                payload: {
+                    reactionWindowId: reactionWindow.id,
+                    reactionBatchId: reactionWindow.batchId,
+                    skillKey: skill.key,
+                    targetId: target.id,
+                    skillFlow: payload.skillFlow
+                }
+            });
+
+            // Prevent the same attack text from being posted again on later resumes.
+            clearStackChatMessages(engineResult.stack);
+            await saveFlowStack(client, engineResult.stack || []);
+            for (const window of reactionWindows) {
+                if (!window?.id || !window.resumePayload) continue;
+                const cleaned = clearResumePayloadChatMessages(window.resumePayload);
+                window.resumePayload = cleaned;
+                await client.query(`
+                    UPDATE reaction_windows
+                    SET resume_payload = $2::jsonb
+                    WHERE id = $1
+                `, [window.id, JSON.stringify(cleaned)]);
+            }
+
+            if (reactionResumeId) {
+                await client.query(`
+                    UPDATE reaction_windows
+                    SET status = 'resolved',
+                        resolved_at = NOW()
+                    WHERE id = $1
+                `, [reactionResumeId]);
+            }
+
+            await client.query('COMMIT');
+            if (progressMessage) io.emit('chat:message', progressMessage);
+            io.emit('chat:message', declarationMessage);
+            if (charactersChanged) io.emit('characters:changed');
+            if (reactionResumeId) {
+                io.emit('combat:reaction-closed', { id: reactionResumeId });
+            }
+            broadcastReactionWindows(reactionWindows);
+
+            const readyLead = reactionWindows.find(
+                item => item.status === 'ready' && item.resumePayload
+            );
+            return res.json({
+                success: true,
+                reactionPending: !readyLead,
+                reactionWindow: readyLead || reactionWindow,
+                reactionWindows,
+                resume: Boolean(readyLead),
+                message: progressMessage || declarationMessage
+            });
+        }
+
+        const flowFinish = { openedWindows: engineResult.openedWindows || [] };
+
+        let postReactionWindows = (flowFinish.openedWindows || []).filter(
+            window => !window.blocking && window.status === 'open'
+        );
+
+        if (!postReactionWindows.length && engineResult.paused) {
+            postReactionWindows = (flowFinish.openedWindows || []).filter(
+                window => window.blocking
             );
         }
 
-        const message = await insertChatMessage(client, {
-            channel: 'combat',
-            messageType: 'skill',
-            characterId: actor.id,
-            characterName: actor.name,
-            characterKind: actor.kind || 'player',
-            content,
-            payload
-        });
+        // Post-skill reactions are emitted by the timing bus during AFTER_SKILL;
+        // keep a soft fallback only when the engine produced no windows.
+        if (!postReactionWindows.length && !engineResult.paused) {
+            const postReactionOptions =
+                await collectPostActionReactionOptions(
+                    client,
+                    actor,
+                    skill,
+                    payload,
+                    cost
+                );
 
-        const battleEvent = await insertBattleEvent(client, {
-            eventType: 'skill',
-            round: battleState.round,
-            turnPass: battleState.turnPass,
-            actorId: actor.id,
-            targetId: target.id,
-            content:
-                payload.battleLogContent ||
-                `${actor.name} 使用「${skill.name}」。`,
-            payload
-        });
+            if (postReactionOptions.length) {
+                postReactionWindows = asReactionWindowList(
+                    await createReactionWindow(client, {
+                        triggerType: combat.TIMING.AFTER_SKILL,
+                        blocking: false,
+                        sourceActorId: actor.id,
+                        sourceTargetId: target.id,
+                        sourceSkillKey: skill.key,
+                        round: battleState.round,
+                        turnPass: battleState.turnPass,
+                        context: {
+                            timingCode: combat.TIMING.AFTER_SKILL,
+                            timingLabel: combat.timingLabel(
+                                combat.TIMING.AFTER_SKILL
+                            ),
+                            actorId: actor.id,
+                            actorName: actor.name,
+                            targetId: target.id,
+                            targetName: target.name,
+                            skillName: skill.name,
+                            actionCode: skill.actionCode,
+                            cost
+                        },
+                        options: postReactionOptions,
+                        resumePayload: null
+                    })
+                );
+            }
+        }
+
+        const postReactionWindow = postReactionWindows[0] || null;
+
+        // Resume that only finishes leftover timings should not spam
+        // another bare "◆ 使用戰技" if the cast/damage was already narrated.
+        const genericFallback = `◆ ${actor.name} 使用「${skill.name}」`;
+        if (!String(content || '').trim()) {
+            content = reactionResumeId ? '' : genericFallback;
+        }
+
+        let message = null;
+        let battleEvent = null;
+
+        if (String(content || '').trim()) {
+            message = await insertChatMessage(client, {
+                channel: 'combat',
+                messageType: 'skill',
+                characterId: actor.id,
+                characterName: actor.name,
+                characterKind: actor.kind || 'player',
+                content,
+                payload
+            });
+
+            battleEvent = await insertBattleEvent(client, {
+                eventType: 'skill',
+                round: battleState.round,
+                turnPass: battleState.turnPass,
+                actorId: actor.id,
+                targetId: target.id,
+                content:
+                    payload.battleLogContent ||
+                    content,
+                payload
+            });
+        }
 
         if (reactionResumeId) {
             await client.query(`
@@ -5808,8 +7187,8 @@ app.post('/api/combat/use-skill', async (req, res) => {
 
         await client.query('COMMIT');
 
-        io.emit('chat:message', message);
-        io.emit('battle:event', battleEvent);
+        if (message) io.emit('chat:message', message);
+        if (battleEvent) io.emit('battle:event', battleEvent);
 
         if (reactionResumeId) {
             io.emit('combat:reaction-closed', {
@@ -5817,8 +7196,19 @@ app.post('/api/combat/use-skill', async (req, res) => {
             });
         }
 
-        if (postReactionWindow) {
-            io.emit('combat:reaction-opened', postReactionWindow);
+        const emitWindows = [
+            ...postReactionWindows,
+            ...(flowFinish.openedWindows || [])
+        ];
+        const seen = new Set();
+        const uniqueWindows = [];
+        for (const window of emitWindows) {
+            if (!window || seen.has(window.id)) continue;
+            seen.add(window.id);
+            uniqueWindows.push(window);
+        }
+        if (uniqueWindows.length) {
+            broadcastReactionWindows(uniqueWindows);
         }
 
         if (charactersChanged) {
@@ -5833,7 +7223,8 @@ app.post('/api/combat/use-skill', async (req, res) => {
             success: true,
             message,
             result: payload,
-            reactionWindow: postReactionWindow
+            reactionWindow: postReactionWindow,
+            reactionWindows: uniqueWindows
         });
     } catch (error) {
         try {
@@ -5867,6 +7258,7 @@ app.post('/api/combat/reset', async (_req, res) => {
             SET round_number = 1,
                 turn_pass = 1,
                 current_character_id = $1,
+                flow_stack = '{"frames":[],"frameSeq":1}'::jsonb,
                 updated_at = NOW()
             WHERE id = 1
         `, [firstId]);
@@ -5881,8 +7273,20 @@ app.post('/api/combat/reset', async (_req, res) => {
             eventType: 'phase',
             round: 1,
             turnPass: 1,
-            content: '第1輪－第1回合'
+            content: '戰鬥開始'
         });
+
+        const timingWindows = await emitTimingHooks(
+            client,
+            [combat.TIMING.BATTLE_START],
+            {
+                actionKind: 'battle',
+                triggerCharacterId: firstId,
+                actorId: firstId,
+                round: 1,
+                turnPass: 1
+            }
+        );
 
         await client.query('COMMIT');
 
@@ -5890,11 +7294,12 @@ app.post('/api/combat/reset', async (_req, res) => {
         io.emit('combat:state', state);
         io.emit('battle:reset', [startEvent, phaseEvent]);
         io.emit('characters:changed');
+        broadcastReactionWindows(timingWindows);
         res.json(state);
     } catch (error) {
         try { await client.query('ROLLBACK'); } catch {}
         console.error(error);
-        res.status(500).json({ error: '重置回合數失敗' });
+        res.status(500).json({ error: 'error' });
     } finally {
         client.release();
     }
@@ -5976,6 +7381,17 @@ app.post('/api/combat/next-turn', async (_req, res) => {
             { round: state.round, turnPass: nextTurnPass }
         );
 
+        const timingWindows = await combat.emitTurnChange(
+            client,
+            {
+                endingCharacterId: state.currentCharacterId,
+                startingCharacterId: nextId,
+                round: state.round,
+                turnPass: nextTurnPass
+            },
+            timingPipelineDeps()
+        );
+
         await client.query('COMMIT');
 
         for (const message of selected.statusMessages) {
@@ -6005,11 +7421,21 @@ app.post('/api/combat/next-turn', async (_req, res) => {
         );
 
         io.emit('combat:state', newState);
-        res.json(newState);
+        broadcastReactionWindows(timingWindows);
+        if (resolution.autoCastQueue?.length) {
+            io.emit('combat:auto-cast', {
+                actorId: nextId,
+                queue: resolution.autoCastQueue
+            });
+        }
+        res.json({
+            ...newState,
+            autoCastQueue: resolution.autoCastQueue || []
+        });
     } catch (error) {
         try { await client.query('ROLLBACK'); } catch {}
         console.error(error);
-        res.status(500).json({ error: '切換回合失敗' });
+        res.status(500).json({ error: '更新戰場失敗' });
     } finally {
         client.release();
     }
@@ -6022,6 +7448,30 @@ app.post('/api/combat/next-round', async (_req, res) => {
         await client.query('BEGIN');
         const clock = await getBattleClock(client, true);
         const nextRound = clock.round + 1;
+
+        // 傳承：快照本輪結束前仍持有的增益（在過期刪除之前）
+        const buffSnap = await client.query(`
+            SELECT cb.character_id, cb.buff_key
+            FROM character_buffs cb
+            ORDER BY cb.character_id, cb.buff_key
+        `);
+        const roundEndBuffs = {};
+        for (const row of buffSnap.rows) {
+            const def = BUFF_CATALOG[row.buff_key];
+            if (!def || def.kind !== 'buff') continue;
+            const id = String(row.character_id);
+            if (!roundEndBuffs[id]) roundEndBuffs[id] = [];
+            roundEndBuffs[id].push({ buffKey: row.buff_key });
+        }
+        const onceRow = await client.query(
+            'SELECT once_flags FROM battle_state WHERE id = 1 FOR UPDATE'
+        );
+        const onceFlags = onceRow.rows[0]?.once_flags || {};
+        onceFlags.roundEndBuffs = roundEndBuffs;
+        await client.query(
+            'UPDATE battle_state SET once_flags = $1::jsonb WHERE id = 1',
+            [JSON.stringify(onceFlags)]
+        );
 
         const expiredPreview = await client.query(`
             SELECT
@@ -6123,7 +7573,7 @@ app.post('/api/combat/next-round', async (_req, res) => {
                 turnPass: nextTurnPass,
                 actorId: expiredBuff.character_id,
                 content:
-                    `${expiredBuff.character_name} 的「${buff?.name || expiredBuff.buff_key}」` +
+                            `${expiredBuff.character_name} 的「${buff?.name || expiredBuff.buff_key}」` +
                     `已在上一輪結束時解除。`,
                 payload: {
                     buffKey: expiredBuff.buff_key
@@ -6147,6 +7597,40 @@ app.post('/api/combat/next-round', async (_req, res) => {
             client,
             nextId,
             { round: nextRound, turnPass: nextTurnPass }
+        );
+
+        const timingWindows = [
+            ...(await emitTimingHooks(
+                client,
+                [combat.TIMING.ROUND_END],
+                {
+                    actionKind: 'round',
+                    round: clock.round,
+                    turnPass: clock.turnPass
+                }
+            )),
+            ...(await emitTimingHooks(
+                client,
+                [combat.TIMING.ROUND_START],
+                {
+                    actionKind: 'round',
+                    round: nextRound,
+                    turnPass: nextTurnPass
+                }
+            ))
+        ];
+
+        // 新輪第一位角色也觸發回合開始時點。
+        const turnStartWindows = await emitTimingHooks(
+            client,
+            [combat.TIMING.TURN_START],
+            {
+                actionKind: 'turn',
+                triggerCharacterId: nextId,
+                actorId: nextId,
+                round: nextRound,
+                turnPass: nextTurnPass
+            }
         );
 
         await client.query('COMMIT');
@@ -6186,6 +7670,10 @@ app.post('/api/combat/next-round', async (_req, res) => {
         );
 
         io.emit('combat:state', newState);
+        broadcastReactionWindows([
+            ...timingWindows,
+            ...turnStartWindows
+        ]);
         res.json(newState);
     } catch (error) {
         try { await client.query('ROLLBACK'); } catch {}
@@ -6264,7 +7752,7 @@ app.post('/api/grid-groups', async (req, res) => {
     const cellSize = Math.floor(number(req.body.cellSize, 160));
 
     if (rows < 1 || cols < 1 || rows > 50 || cols > 50) {
-        return res.status(400).json({ error: '高與寬必須介於 1～50' });
+        return res.status(400).json({ error: '高度寬度須介於 1～20' });
     }
 
     const client = await pool.connect();
@@ -6316,7 +7804,7 @@ app.patch('/api/grid-groups/:id/move', async (req, res) => {
             number(req.params.id)
         ]);
 
-        if (!result.rows.length) return res.status(404).json({ error: '找不到這個戰場' });
+        if (!result.rows.length) return res.status(404).json({ error: 'error' });
         res.json({ success: true });
     } catch (error) {
         console.error(error);
@@ -6338,7 +7826,7 @@ app.delete('/api/grid-groups/:id', async (req, res) => {
         }
 
         const result = await pool.query('DELETE FROM grid_groups WHERE id = $1 RETURNING id', [groupId]);
-        if (!result.rows.length) return res.status(404).json({ error: '找不到這個戰場' });
+        if (!result.rows.length) return res.status(404).json({ error: 'error' });
         res.json({ success: true });
     } catch (error) {
         console.error(error);
@@ -6362,14 +7850,14 @@ app.post('/api/combat/move-character', async (req, res) => {
         );
         if (!characterResult.rows.length) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: '找不到角色' });
+            return res.status(404).json({ error: 'error' });
         }
         const character = characterResult.rows[0];
 
         if (actionActorId !== characterId) {
             await client.query('ROLLBACK');
             return res.status(400).json({
-                error: `目前選擇的行動角色不是「${character.name}」`
+                    error: `無法移動「${character.name}」`
             });
         }
 
@@ -6381,7 +7869,7 @@ app.post('/api/combat/move-character', async (req, res) => {
         `, [characterId]);
         if (!sourceResult.rows.length) {
             await client.query('ROLLBACK');
-            return res.status(400).json({ error: '角色目前不在戰場上' });
+            return res.status(400).json({ error: 'error' });
         }
 
         const source = sourceResult.rows[0];
@@ -6399,7 +7887,7 @@ app.post('/api/combat/move-character', async (req, res) => {
 
         if (!targetResult.rows.length) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: '找不到目標格子' });
+            return res.status(404).json({ error: 'error' });
         }
 
         const target = targetResult.rows[0];
@@ -6422,7 +7910,7 @@ app.post('/api/combat/move-character', async (req, res) => {
         if (Number(character.sp) < moveSpCost) {
             await client.query('ROLLBACK');
             return res.status(400).json({
-                error: `${character.name} 的 SP 不足，無法移動`
+                    error: `無法移動「${character.name}」`
             });
         }
 
@@ -6451,16 +7939,16 @@ app.post('/api/combat/move-character', async (req, res) => {
         }
 
         const clock = await getBattleClock(client);
-        const sourceLabel = `戰場${source.group_id}（${Number(source.row_index)+1},${Number(source.col_index)+1}）`;
-        const targetLabel = `戰場${target.group_id}（${Number(target.row_index)+1},${Number(target.col_index)+1}）`;
+        const sourceLabel = `戰場（${source.group_id}:${Number(source.row_index)+1},${Number(source.col_index)+1}）`;
+        const targetLabel = `戰場（${target.group_id}:${Number(target.row_index)+1},${Number(target.col_index)+1}）`;
 
         const content =
-            `↔ ${character.name} 使用基礎移動\n` +
-            `${sourceLabel} → ${targetLabel}\n` +
+            `◆ ${character.name} 使用基礎移動\n` +
+            `${sourceLabel} ??${targetLabel}\n` +
             (
                 hasSwift
-                    ? '【疾行】發動：本次移動消耗 -1，實際消耗 0SP'
-                    : `消耗 ${moveSpCost}SP`
+                    ? '【疾行】使本次戰鬥移動消耗變為 0 SP。'
+                    : `消耗 ${moveSpCost} SP。`
             );
 
         const message = await insertChatMessage(client, {
@@ -6485,11 +7973,11 @@ app.post('/api/combat/move-character', async (req, res) => {
             turnPass: clock.turnPass,
             actorId: character.id,
             content:
-                `${character.name} 從 ${sourceLabel} 移動至 ${targetLabel}，` +
+                `${character.name} 從 ${sourceLabel} 移動到 ${targetLabel}，` +
                 (
                     hasSwift
-                        ? '【疾行】使本次基礎移動消耗降為 0 SP。'
-                        : `消耗 ${moveSpCost} SP。`
+                    ? '【疾行】使本次戰鬥移動消耗變為 0 SP。'
+                    : `消耗 ${moveSpCost} SP。`
                 ),
             payload: {
                 sourceCellId: Number(source.id),
@@ -6498,6 +7986,27 @@ app.post('/api/combat/move-character', async (req, res) => {
                 swiftConsumed: hasSwift
             }
         });
+
+        const timingWindows = await combat.emitMove(
+            client,
+            {
+                triggerCharacterId: character.id,
+                actorId: character.id,
+                actorName: character.name,
+                actorKind: character.kind || 'player',
+                round: clock.round,
+                turnPass: clock.turnPass,
+                results: {
+                    moves: [{
+                        characterId: character.id,
+                        sourceCellId: Number(source.id),
+                        targetCellId,
+                        spCost: moveSpCost
+                    }]
+                }
+            },
+            timingPipelineDeps()
+        );
 
         await client.query('COMMIT');
 
@@ -6510,6 +8019,7 @@ app.post('/api/combat/move-character', async (req, res) => {
             sourceCellId: Number(source.id),
             targetCellId
         });
+        broadcastReactionWindows(timingWindows);
 
         res.json({
             success: true,
@@ -6542,13 +8052,13 @@ app.patch('/api/cells/:cellId/occupy', async (req, res) => {
 
         if (!cellCheck.rows.length) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: '找不到這個格子' });
+            return res.status(404).json({ error: 'error' });
         }
 
         const occupiedBy = cellCheck.rows[0].occupied_by;
         if (occupiedBy !== null && occupiedBy !== characterId) {
             await client.query('ROLLBACK');
-            return res.status(400).json({ error: '這個格子已經有其他角色' });
+        return res.status(400).json({ error: '這個格子已經有其他角色' });
         }
 
         await client.query('UPDATE cells SET occupied_by = NULL WHERE occupied_by = $1', [characterId]);
@@ -6594,10 +8104,10 @@ async function start() {
         await ensureBattleLogSeed();
         httpServer.listen(PORT, HOST, () => {
             console.log(`伺服器已啟動：http://${HOST}:${PORT}`);
-            console.log('即時聊天室：Socket.IO 已啟用');
+            console.log('聊天室與 Socket.IO 已就緒');
         });
     } catch (error) {
-        console.error('啟動失敗：', error);
+        console.error('啟動失敗', error);
         process.exit(1);
     }
 }

@@ -37,6 +37,24 @@ export function percent(current, max) {
     return Math.max(0, Math.min(100, (current / max) * 100));
 }
 
+const HTML_ESCAPES = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+};
+
+/**
+ * Escape a value before interpolating it into an innerHTML template.
+ * Required for anything originating from user input or the API — character
+ * names, skill/buff text, error messages.
+ */
+export function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value).replace(/[&<>"']/g, char => HTML_ESCAPES[char]);
+}
+
 export function createImageOrInitial(src, name, className = '') {
     const wrap = document.createElement('div');
     wrap.className = className;

@@ -1,5 +1,5 @@
 import { api } from './api.js';
-import { closeModal, createImageOrInitial, openModal, percent, showToast } from './ui.js';
+import { closeModal, createImageOrInitial, escapeHtml, openModal, percent, showToast } from './ui.js';
 import { getSidebarSection, setSidebarCounts } from './sidebar.js';
 
 let characters = [];
@@ -345,36 +345,51 @@ function hideBuffTooltip() {
     buffTooltipLayer?.classList.add('hidden');
 }
 
+function formatStatDelta(delta) {
+    const value = Number(delta || 0);
+    if (!Number.isFinite(value) || Math.abs(value) < 0.0001) return '';
+    const rounded = Number.isInteger(value) ? value : Number(value.toFixed(2));
+    return rounded > 0 ? `(+${rounded})` : `(${rounded})`;
+}
+
 function createBuffIcon(character, buff) {
     const button = document.createElement('button');
     button.type = 'button';
     const statusClass =
-        buff.kind === 'debuff'
-            ? 'debuff-status'
-            : buff.kind === 'special'
-                ? 'special-status'
-                : 'buff-status';
+        buff.subtype === 'abnormal'
+            ? 'debuff-status abnormal-status'
+            : buff.kind === 'debuff'
+                ? 'debuff-status'
+                : buff.kind === 'special'
+                    ? 'special-status'
+                    : 'buff-status';
     button.className = `buff-icon ${statusClass}`;
     button.innerHTML = buffIconSvg(buff.icon);
     const stackText = Number(buff.stackCount || 1) > 1
         ? ` ×${buff.stackCount}`
         : '';
-    const valueText = buff.valueNum !== null && buff.valueNum !== undefined
-        ? `\n目前數值：${compactNumber(buff.valueNum)}`
-        : '';
-
+    const valueText = buff.parametric
+        ? ''
+        : (buff.valueNum !== null && buff.valueNum !== undefined
+            ? `\n目前數值：${compactNumber(buff.valueNum)}`
+            : '');
     const durationText = buff.expiresRound
         ? `\n期限：第 ${buff.expiresRound} 輪結束前或提前觸發`
         : '';
+    const sourceText = buff.sourceSkillName
+        ? `\n來自 ${buff.sourceCharacterName || '未知角色'} 的「${buff.sourceSkillName}」`
+        : '';
     const kindText =
-        buff.kind === 'debuff'
-            ? '減益'
-            : buff.kind === 'special'
-                ? '特殊狀態'
-                : '增益';
-
-    button.dataset.tooltip =
-        `【${kindText}】${buff.name}${stackText}\n${buff.effect}${valueText}${durationText}\n點擊可移除`;
+        buff.subtype === 'abnormal'
+            ? '異常狀態'
+            : buff.kind === 'debuff'
+                ? '減益'
+                : buff.kind === 'special'
+                    ? '特殊狀態'
+                    : '增益';
+    const detailText =
+        `【${kindText}】${buff.name}${stackText}\n${buff.effect}${valueText}${durationText}${sourceText}\n點擊可移除`;
+    button.dataset.tooltip = detailText;
     button.title = `${buff.name}${stackText}｜${buff.effect}`;
     button.setAttribute('aria-label', `${buff.name}${stackText}：${buff.effect}`);
 
@@ -386,13 +401,7 @@ function createBuffIcon(character, buff) {
     }
 
     button.addEventListener('mouseenter', () => {
-        const durationText = buff.expiresRound
-            ? `\n持續：第 ${buff.expiresRound} 輪結束前`
-            : '';
-        showBuffTooltip(
-            button,
-            `${buff.name}${stackText}\n${buff.effect}${valueText}${durationText}`
-        );
+        showBuffTooltip(button, detailText);
     });
     button.addEventListener('mouseleave', hideBuffTooltip);
     button.addEventListener('blur', hideBuffTooltip);
@@ -400,7 +409,8 @@ function createBuffIcon(character, buff) {
     button.addEventListener('click', async event => {
         event.stopPropagation();
         try {
-            const updated = await api.removeBuff(character.id, buff.key);
+            const key = buff.dbKey || buff.key;
+            const updated = await api.removeBuff(character.id, key);
             replaceCharacter(updated);
             renderCharacters();
             showToast(`已移除 ${buff.name}`);
@@ -412,26 +422,217 @@ function createBuffIcon(character, buff) {
     return button;
 }
 
+function openParametricModPicker(character, catalogEntry) {
+    const stats = catalogEntry.stats || [];
+    const modes = catalogEntry.modes || ['flat', 'pct'];
+    const panel = document.createElement('div');
+    panel.className = 'buff-mod-picker';
+    panel.innerHTML = `
+        <label>能力值
+            <select id="buff-mod-stat">
+                ${stats.map(s => `<option value="${escapeHtml(s.key)}">${escapeHtml(s.label)}</option>`).join('')}
+            </select>
+        </label>
+        <label>模式
+            <select id="buff-mod-mode">
+                ${modes.map(m => `<option value="${escapeHtml(m)}">${m === 'pct' ? '百分比' : '固定值'}</option>`).join('')}
+            </select>
+        </label>
+        <label>數值（整數，可負）
+            <input id="buff-mod-value" type="number" step="1" value="10">
+        </label>
+        <button type="button" class="primary-btn" id="buff-mod-apply">套用</button>
+    `;
+
+    const choices = document.getElementById('buff-choice-list');
+    choices.innerHTML = '';
+    choices.appendChild(panel);
+
+    panel.querySelector('#buff-mod-apply').addEventListener('click', async () => {
+        const stat = panel.querySelector('#buff-mod-stat').value;
+        const mode = panel.querySelector('#buff-mod-mode').value;
+        const valueNum = Math.trunc(Number(panel.querySelector('#buff-mod-value').value));
+        if (!Number.isFinite(valueNum) || valueNum === 0) {
+            showToast('請輸入非零整數', 'error');
+            return;
+        }
+        try {
+            const sourceCharacterId =
+                Number(localStorage.getItem('trpg-action-actor-id')) ||
+                character.id;
+            const updated = await api.addBuff(
+                character.id,
+                null,
+                sourceCharacterId,
+                { stat, mode, valueNum }
+            );
+            replaceCharacter(updated);
+            renderCharacters();
+            closeModal('buff-modal');
+            const label = stats.find(s => s.key === stat)?.label || stat;
+            showToast(`已套用 ${label} ${valueNum > 0 ? '+' : ''}${valueNum}${mode === 'pct' ? '%' : ''}`);
+        } catch (error) {
+            showToast(error.message, 'error');
+        }
+    });
+}
+
+function openTickValuePicker(character, buff) {
+    const panel = document.createElement('div');
+    panel.className = 'buff-mod-picker';
+    panel.innerHTML = `
+        <p class="buff-picker-hint">設定「${escapeHtml(buff.name)}」每次損失的 HP 數值。</p>
+        <label>效果值（正整數）
+            <input id="buff-tick-value" type="number" min="1" step="1" value="10">
+        </label>
+        <button type="button" class="primary-btn" id="buff-tick-apply">套用</button>
+    `;
+
+    const choices = document.getElementById('buff-choice-list');
+    choices.innerHTML = '';
+    choices.appendChild(panel);
+
+    panel.querySelector('#buff-tick-apply').addEventListener('click', async () => {
+        const valueNum = Math.trunc(Number(panel.querySelector('#buff-tick-value').value));
+        if (!Number.isFinite(valueNum) || valueNum <= 0) {
+            showToast('請輸入正整數效果值', 'error');
+            return;
+        }
+        try {
+            const updated = await api.addBuff(character.id, buff.key, null, { valueNum });
+            replaceCharacter(updated);
+            renderCharacters();
+            closeModal('buff-modal');
+            showToast(`已套用 ${buff.name}（每次 ${valueNum} HP）`);
+        } catch (error) {
+            showToast(error.message, 'error');
+        }
+    });
+}
+
+function openLinkedCharacterPicker(character, buff, {
+    mode = 'source',
+    title = '選擇角色'
+} = {}) {
+    const panel = document.createElement('div');
+    panel.className = 'buff-mod-picker';
+    const options = characters
+        .filter(item => item.id !== character.id || mode === 'source')
+        .map(item => `
+            <option value="${item.id}">
+                ${escapeHtml(item.name)}（${item.kind === 'enemy' ? '敵方' : '友方'}）
+            </option>
+        `)
+        .join('');
+
+    panel.innerHTML = `
+        <p class="buff-picker-hint">${escapeHtml(title)}</p>
+        <label>角色
+            <select id="buff-link-character">${options}</select>
+        </label>
+        <button type="button" class="primary-btn" id="buff-link-apply">套用</button>
+    `;
+
+    const choices = document.getElementById('buff-choice-list');
+    choices.innerHTML = '';
+    choices.appendChild(panel);
+
+    if (!options) {
+        showToast('沒有可選角色', 'error');
+        return;
+    }
+
+    panel.querySelector('#buff-link-apply').addEventListener('click', async () => {
+        const linkedId = Number(panel.querySelector('#buff-link-character').value);
+        if (!linkedId) {
+            showToast('請選擇角色', 'error');
+            return;
+        }
+        try {
+            const extra = mode === 'link'
+                ? { valueNum: linkedId }
+                : {};
+            const sourceCharacterId = mode === 'source' ? linkedId : null;
+            const updated = await api.addBuff(
+                character.id,
+                buff.key,
+                sourceCharacterId,
+                extra
+            );
+            replaceCharacter(updated);
+            renderCharacters();
+            closeModal('buff-modal');
+            const linked = characters.find(item => item.id === linkedId);
+            showToast(`已套用 ${buff.name} → ${linked?.name || linkedId}`);
+        } catch (error) {
+            showToast(error.message, 'error');
+        }
+    });
+}
+
 function openBuffPicker(character) {
     buffCharacterId = character.id;
     document.getElementById('buff-target-name').textContent = character.name;
 
     const choices = document.getElementById('buff-choice-list');
     choices.innerHTML = '';
-    const activeKeys = new Set((character.buffs || []).map(buff => buff.key));
+    const activeKeys = new Set((character.buffs || []).map(buff => buff.dbKey || buff.key));
 
     for (const buff of buffCatalog) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'buff-choice';
+        if (buff.parametricPicker) {
+            button.disabled = false;
+            const category = buff.categoryLabel || '能力值修正';
+            button.innerHTML = `
+                <span class="buff-choice-icon">${buffIconSvg(buff.icon)}</span>
+                <span><strong>${escapeHtml(buff.name)}</strong><small>${escapeHtml(category)}｜${escapeHtml(buff.effect)}</small></span>
+                <em>設定</em>
+            `;
+            button.addEventListener('click', () => {
+                openParametricModPicker(character, buff);
+            });
+            choices.appendChild(button);
+            continue;
+        }
+
         button.disabled = activeKeys.has(buff.key);
+        const category =
+            buff.categoryLabel ||
+            (buff.subtype === 'abnormal'
+                ? '異常狀態'
+                : buff.kind === 'debuff'
+                    ? '減益'
+                    : buff.kind === 'special'
+                        ? '特殊狀態'
+                        : '增益');
+        const needsExtra = buff.manualValue || buff.manualSource || buff.manualLink;
         button.innerHTML = `
             <span class="buff-choice-icon">${buffIconSvg(buff.icon)}</span>
-            <span><strong>${buff.name}</strong><small>${buff.effect}</small></span>
-            <em>${activeKeys.has(buff.key) ? '已套用' : '＋'}</em>
+            <span><strong>${escapeHtml(buff.name)}</strong><small>${escapeHtml(category)}｜${escapeHtml(buff.effect)}</small></span>
+            <em>${activeKeys.has(buff.key) ? '已套用' : (needsExtra ? '設定' : '＋')}</em>
         `;
 
         button.addEventListener('click', async () => {
+            if (buff.manualValue) {
+                openTickValuePicker(character, buff);
+                return;
+            }
+            if (buff.manualSource) {
+                openLinkedCharacterPicker(character, buff, {
+                    mode: 'source',
+                    title: `選擇「${buff.name}」的施加者`
+                });
+                return;
+            }
+            if (buff.manualLink) {
+                openLinkedCharacterPicker(character, buff, {
+                    mode: 'link',
+                    title: `選擇「${buff.name}」的指定對象`
+                });
+                return;
+            }
             try {
                 const sourceCharacterId =
                     Number(localStorage.getItem('trpg-action-actor-id')) ||
@@ -531,7 +732,7 @@ function renderCharacters() {
 
         const name = document.createElement('div');
         name.className = 'character-name';
-        name.innerHTML = `<span>${character.name}</span>${character.kind === 'enemy' ? '<small>ENEMY</small>' : ''}`;
+        name.innerHTML = `<span>${escapeHtml(character.name)}</span>${character.kind === 'enemy' ? '<small>ENEMY</small>' : ''}`;
 
         const stats = document.createElement('div');
         stats.className = 'character-bars';
@@ -601,8 +802,8 @@ function renderSkillLoadout(character) {
             button.innerHTML = `
                 <span class="skill-slot-number">${slotIndex + 1}</span>
                 <span class="skill-slot-content">
-                    <strong>${equipped.name}</strong>
-                    <small>${equipped.source}｜Lv.${equipped.level}｜${equipped.cost}</small>
+                    <strong>${escapeHtml(equipped.name)}</strong>
+                    <small>${escapeHtml(equipped.source)}｜Lv.${escapeHtml(equipped.level)}｜${escapeHtml(equipped.cost)}</small>
                 </span>
             `;
             button.title = `${equipped.name}\n${equipped.effect}`;
@@ -637,11 +838,11 @@ function createSkillChoice(skill, character, slotIndex, selectedProfession) {
 
     button.disabled = alreadyEquipped;
     button.innerHTML = `
-        <span class="skill-choice-level">Lv.${skill.level}</span>
+        <span class="skill-choice-level">Lv.${escapeHtml(skill.level)}</span>
         <span class="skill-choice-main">
-            <strong>${skill.name}</strong>
-            <small>${skill.timing}｜${skill.cost}｜${skill.weapon}</small>
-            <p>${skill.effect}</p>
+            <strong>${escapeHtml(skill.name)}</strong>
+            <small>${escapeHtml(skill.timing)}｜${escapeHtml(skill.cost)}｜${escapeHtml(skill.weapon)}</small>
+            <p>${escapeHtml(skill.effect)}</p>
         </span>
         <em>${alreadyEquipped ? '已攜帶' : '選擇'}</em>
     `;
@@ -690,7 +891,7 @@ async function openSkillPicker(character, slotIndex) {
 
     currentEl.innerHTML = `
         <span>戰技欄 ${slotIndex + 1}</span>
-        <strong>${current ? current.name : '尚未攜帶戰技'}</strong>
+        <strong>${current ? escapeHtml(current.name) : '尚未攜帶戰技'}</strong>
     `;
 
     listEl.innerHTML = '<div class="skill-picker-loading">讀取戰技資料…</div>';
@@ -733,7 +934,7 @@ async function openSkillPicker(character, slotIndex) {
 
             const heading = document.createElement('div');
             heading.className = 'skill-picker-group-heading';
-            heading.innerHTML = `<strong>${title}</strong>${hint ? `<small>${hint}</small>` : ''}`;
+            heading.innerHTML = `<strong>${escapeHtml(title)}</strong>${hint ? `<small>${escapeHtml(hint)}</small>` : ''}`;
             section.appendChild(heading);
 
             if (!skills.length) {
@@ -762,7 +963,7 @@ async function openSkillPicker(character, slotIndex) {
 
         addGroup('通用戰技', catalog.common || [], '所有職業皆可選擇');
     } catch (error) {
-        listEl.innerHTML = `<div class="skill-picker-error">${error.message}</div>`;
+        listEl.innerHTML = `<div class="skill-picker-error">${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -810,28 +1011,50 @@ function fillCharacterSheet(character, overwriteInputs = true) {
         document.getElementById('sheet-profession-select').value = character.profession || '';
 
         const effectivePairs = {
-            'sheet-patk-input': ['物理攻擊', character.patk, character.effective?.patk],
-            'sheet-matk-input': ['魔法攻擊', character.matk, character.effective?.matk],
-            'sheet-crit-input': ['暴擊率 %', character.crit, character.effective?.crit],
-            'sheet-critDamageBonus-input': ['額外暴擊傷害 %', character.critDamageBonus ?? 0, character.effective?.critDamageBonus ?? character.critDamageBonus ?? 0],
-            'sheet-hitRate-input': ['命中', character.hitRate, character.effective?.hitRate],
-            'sheet-dodge-input': ['迴避', character.dodge, character.effective?.dodge],
-            'sheet-speed-input': ['行動速度', character.speed, character.effective?.speed],
-            'sheet-defense-input': ['防禦', character.defense, character.effective?.defense],
-            'sheet-resist-input': ['魔抗', character.resist, character.effective?.resist],
-            'sheet-blockRate-input': ['格擋率', character.blockRate, character.effective?.blockRate]
+            'sheet-patk-input': ['物理攻擊', 'patk', character.patk, character.effective?.patk, character.effective?.patkDelta],
+            'sheet-matk-input': ['魔法攻擊', 'matk', character.matk, character.effective?.matk, character.effective?.matkDelta],
+            'sheet-crit-input': ['暴擊率 %', 'crit', character.crit, character.effective?.crit, character.effective?.critDelta],
+            'sheet-critDamageBonus-input': ['額外暴擊傷害 %', 'critDamageBonus', character.critDamageBonus ?? 0, character.effective?.critDamageBonus ?? character.critDamageBonus ?? 0, character.effective?.critDamageBonusDelta],
+            'sheet-hitRate-input': ['命中', 'hitRate', character.hitRate, character.effective?.hitRate, character.effective?.hitRateDelta],
+            'sheet-dodge-input': ['迴避', 'dodge', character.dodge, character.effective?.dodge, character.effective?.dodgeDelta],
+            'sheet-speed-input': ['行動速度', 'speed', character.speed, character.effective?.speed, character.effective?.speedDelta],
+            'sheet-defense-input': ['防禦', 'defense', character.defense, character.effective?.defense, character.effective?.defenseDelta],
+            'sheet-resist-input': ['魔抗', 'resist', character.resist, character.effective?.resist, character.effective?.resistDelta],
+            'sheet-blockRate-input': ['格擋率', 'blockRate', character.blockRate, character.effective?.blockRate, character.effective?.blockRateDelta]
         };
 
-        for (const [id, [label, base, effective]] of Object.entries(effectivePairs)) {
+        for (const [id, [label, deltaKey, base, effective, delta]] of Object.entries(effectivePairs)) {
             const input = document.getElementById(id);
             const baseNumber = Number(base ?? 0);
             const effectiveNumber = Number(effective ?? baseNumber);
-            const changed = Math.abs(effectiveNumber - baseNumber) > 0.0001;
+            const deltaNumber = Number(
+                delta ?? (effectiveNumber - baseNumber)
+            );
+            const changed = Math.abs(deltaNumber) > 0.0001;
+            const deltaText = formatStatDelta(deltaNumber);
 
             input.classList.toggle('buffed-stat-input', changed);
             input.title = changed
-                ? `${label}：基礎 ${compactNumber(baseNumber)} → Buff後 ${compactNumber(effectiveNumber)}`
+                ? `${label}：基礎 ${compactNumber(baseNumber)} → 有效 ${compactNumber(effectiveNumber)}`
                 : `${label}：${compactNumber(baseNumber)}`;
+
+            const deltaEl = document.querySelector(`.stat-delta[data-delta="${deltaKey}"]`);
+            if (deltaEl) {
+                deltaEl.textContent = deltaText;
+                deltaEl.classList.toggle('is-up', deltaNumber > 0);
+                deltaEl.classList.toggle('is-down', deltaNumber < 0);
+                deltaEl.classList.toggle('hidden', !deltaText);
+            }
+        }
+
+        const maxHpDeltaEl = document.querySelector('.stat-delta[data-delta="maxHp"]');
+        if (maxHpDeltaEl) {
+            const maxHpDelta = Number(character.effective?.maxHpDelta || 0);
+            const maxHpText = formatStatDelta(maxHpDelta);
+            maxHpDeltaEl.textContent = maxHpText;
+            maxHpDeltaEl.classList.toggle('is-up', maxHpDelta > 0);
+            maxHpDeltaEl.classList.toggle('is-down', maxHpDelta < 0);
+            maxHpDeltaEl.classList.toggle('hidden', !maxHpText);
         }
     }
 
@@ -851,9 +1074,9 @@ function openCharacterSheet(character) {
 async function loadCharacters() {
     try {
         const fallbackBuffs = [
-            { key: 'attack_order', name: '進攻指令', effect: '攻擊力增加25%', icon: 'sword' },
-            { key: 'war_cry', name: '戰吼', effect: '傷害增加25%', icon: 'warcry' },
-            { key: 'defense_stance', name: '防禦姿態', effect: '防禦力增加25%', icon: 'shield' }
+            { key: 'patk_up_25', name: '物理攻擊 +25%', effect: '物理攻擊 +25%', icon: 'stat_up', kind: 'buff' },
+            { key: 'damage_up_25', name: '造成傷害 +25%', effect: '造成傷害 +25%', icon: 'stat_up', kind: 'buff' },
+            { key: 'defense_up_25', name: '防禦 +25%', effect: '防禦 +25%', icon: 'stat_up', kind: 'buff' }
         ];
 
         const [loadedCharacters, loadedBuffs] = await Promise.all([

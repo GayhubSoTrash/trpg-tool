@@ -176,6 +176,13 @@
 
         <section id="combat-composer" class="combat-composer">
 
+            <section id="reaction-peers" class="reaction-peers hidden" aria-live="polite"></section>
+            <div id="reaction-default-bar" class="reaction-default-bar hidden">
+                <button id="reaction-default-skip-btn" class="reaction-default-skip-btn" type="button">
+                    默認不做反應
+                </button>
+            </div>
+
             <section id="reaction-panel" class="reaction-panel hidden" aria-live="polite">
                 <div class="reaction-panel-head">
                     <div>
@@ -187,9 +194,22 @@
 
                 <div id="reaction-options" class="reaction-options"></div>
 
-                <button id="reaction-skip-btn" class="reaction-skip-btn" type="button">
-                    放棄剩餘反應
-                </button>
+                <div class="reaction-panel-actions">
+                    <button id="reaction-skip-btn" class="reaction-skip-btn" type="button">
+                        本次不反應
+                    </button>
+                </div>
+            </section>
+
+            <section id="timing-pick-panel" class="reaction-panel timing-pick-panel hidden" aria-live="polite">
+                <div class="reaction-panel-head">
+                    <div>
+                        <span class="eyebrow">TIMING</span>
+                        <strong id="timing-pick-title">選擇適用目標</strong>
+                    </div>
+                    <span id="timing-pick-context" class="reaction-context"></span>
+                </div>
+                <div id="timing-pick-options" class="reaction-options"></div>
             </section>
 
             <div class="combat-actor-select">
@@ -344,7 +364,7 @@
                 <div class="sheet-vitals editable-vitals">
                     <div class="sheet-vital hp-field">
                         <div>
-                            <span>HP</span>
+                            <span>HP<em class="stat-delta" data-delta="maxHp"></em></span>
                             <label class="sheet-pair"><input id="sheet-hp-input" type="number" min="0"><b>/</b><input id="sheet-max-hp-input" type="number" min="0"></label>
                         </div>
                         <div class="sheet-bar"><i id="sheet-hp-fill"></i></div>
@@ -368,16 +388,16 @@
 
             <div class="section-title"><span>副能力</span></div>
             <div class="sheet-stats editable-sheet-stats secondary-ability-grid">
-                <label><span>物理攻擊</span><input id="sheet-patk-input" type="number"></label>
-                <label><span>魔法攻擊</span><input id="sheet-matk-input" type="number"></label>
-                <label><span>暴擊率 %</span><input id="sheet-crit-input" type="number" min="0"></label>
-                <label><span>額外暴擊傷害 %</span><input id="sheet-critDamageBonus-input" type="number" min="0"></label>
-                <label><span>命中</span><input id="sheet-hitRate-input" type="number"></label>
-                <label><span>迴避</span><input id="sheet-dodge-input" type="number"></label>
-                <label><span>行動速度</span><input id="sheet-speed-input" type="number"></label>
-                <label><span>防禦</span><input id="sheet-defense-input" type="number"></label>
-                <label><span>魔抗</span><input id="sheet-resist-input" type="number"></label>
-                <label><span>格擋率 %</span><input id="sheet-blockRate-input" type="number" min="0" max="75" step="1"></label>
+                <label><span>物理攻擊<em class="stat-delta" data-delta="patk"></em></span><input id="sheet-patk-input" type="number"></label>
+                <label><span>魔法攻擊<em class="stat-delta" data-delta="matk"></em></span><input id="sheet-matk-input" type="number"></label>
+                <label><span>暴擊率 %<em class="stat-delta" data-delta="crit"></em></span><input id="sheet-crit-input" type="number" min="0"></label>
+                <label><span>額外暴擊傷害 %<em class="stat-delta" data-delta="critDamageBonus"></em></span><input id="sheet-critDamageBonus-input" type="number" min="0"></label>
+                <label><span>命中<em class="stat-delta" data-delta="hitRate"></em></span><input id="sheet-hitRate-input" type="number"></label>
+                <label><span>迴避<em class="stat-delta" data-delta="dodge"></em></span><input id="sheet-dodge-input" type="number"></label>
+                <label><span>行動速度<em class="stat-delta" data-delta="speed"></em></span><input id="sheet-speed-input" type="number"></label>
+                <label><span>防禦<em class="stat-delta" data-delta="defense"></em></span><input id="sheet-defense-input" type="number"></label>
+                <label><span>魔抗<em class="stat-delta" data-delta="resist"></em></span><input id="sheet-resist-input" type="number"></label>
+                <label><span>格擋率 %<em class="stat-delta" data-delta="blockRate"></em></span><input id="sheet-blockRate-input" type="number" min="0" max="75" step="1"></label>
                 <label><span>戰技數量</span><input id="sheet-skillSlots-input" type="number" min="0" max="30"></label>
             </div>
 

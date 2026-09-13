@@ -6,13 +6,14 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "init-db": "node init-db.js"
+    "init-db": "node init-db.js",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "multer": "^2.3.0",
     "pg": "^8.23.0",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.3"
   }
 }
